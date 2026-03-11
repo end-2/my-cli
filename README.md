@@ -40,6 +40,9 @@ make build sample GOPRIVATE='github.com/your-org/*'
 현재 binary 버전은 아래처럼 확인할 수 있습니다.
 
 ```bash
+./bin/sample --help
+./bin/sample --dry-run
+./bin/sample --version
 ./bin/sample -version
 ```
 
