@@ -1,6 +1,6 @@
 # my-github
 
-`my-github`는 GitHub REST API에서 issue, pull request, commit 정보를 조회하는 단일 목적 CLI입니다.  
+`my-github`는 GitHub REST API에서 issue, pull request, commit, 특정 ref의 commit history를 조회하는 단일 목적 CLI입니다.  
 입력은 JSON 객체 하나만 받으며, 결과도 JSON으로 출력합니다.
 
 이 커맨드는 `my-cli` 프로젝트의 일부이며, 빌드/테스트/린트는 모두 Docker 컨테이너에서 실행합니다.
@@ -128,6 +128,10 @@ JSON 입력은 둘 중 하나로 전달합니다.
 echo '{"kind":"commit","owner":"cli","repo":"cli","ref":"trunk"}' | ./bin/my-github
 ```
 
+```bash
+./bin/my-github '{"kind":"commit_history","owner":"cli","repo":"cli","ref":"release/1.0","limit":10}'
+```
+
 지원 플래그는 아래와 같습니다.
 
 - `--version`, `-version`, `-v`
@@ -151,7 +155,8 @@ echo '{"kind":"commit","owner":"cli","repo":"cli","ref":"trunk"}' | ./bin/my-git
 | `owner` | string | 예 | GitHub owner 또는 org |
 | `repo` | string | 예 | GitHub repository 이름 |
 | `number` | integer | 조건부 | `issue`, `pull_request` 조회 시 필요 |
-| `ref` | string | 조건부 | `commit` 조회 시 필요. SHA, branch, tag 모두 가능 |
+| `ref` | string | 조건부 | `commit`, `commit_history` 조회 시 필요. `commit`에서는 SHA/branch/tag, `commit_history`에서는 보통 branch 이름을 사용 |
+| `limit` | integer | 조건부 | `commit_history` 조회 시 선택값. 1부터 100까지 가능하며, 생략 시 30 |
 
 ## kind 값
 
@@ -160,13 +165,15 @@ echo '{"kind":"commit","owner":"cli","repo":"cli","ref":"trunk"}' | ./bin/my-git
 | `issue` | Issue 조회 |
 | `pull_request` | Pull Request 조회 |
 | `commit` | Commit 조회 |
+| `commit_history` | 특정 ref 기준 commit history 조회 |
 
 아래 별칭도 허용합니다.
 
 - `pr`
 - `pull-request`
+- `commit-history`
 
-별칭을 넣어도 출력의 `kind` 값은 항상 `pull_request`로 정규화됩니다.
+별칭을 넣어도 출력의 `kind` 값은 각각 `pull_request`, `commit_history`로 정규화됩니다.
 
 ## 종류별 스펙
 
@@ -321,6 +328,83 @@ echo '{"kind":"commit","owner":"cli","repo":"cli","ref":"trunk"}' | ./bin/my-git
 
 GitHub commit author와 Git author가 다를 수 있으므로 `author.login`은 없을 수도 있습니다.
 
+### 4. Commit History
+
+입력 예시입니다.
+
+```json
+{
+  "kind": "commit_history",
+  "owner": "cli",
+  "repo": "cli",
+  "ref": "release/1.0",
+  "limit": 2
+}
+```
+
+규칙입니다.
+
+- `ref`는 비어 있으면 안 됩니다.
+- `ref`는 GitHub API의 `sha` query에 전달되며, 일반적으로 branch 이름을 사용합니다.
+- `limit`은 1부터 100까지 가능하며, 생략하면 30을 사용합니다.
+- `number`는 허용되지 않습니다.
+
+출력 예시입니다.
+
+```json
+{
+  "kind": "commit_history",
+  "repository": {
+    "owner": "cli",
+    "repo": "cli"
+  },
+  "commit_history": {
+    "ref": "release/1.0",
+    "limit": 2,
+    "commits": [
+      {
+        "sha": "abc123",
+        "message": "First commit",
+        "author": {
+          "login": "octocat",
+          "name": "Octo Cat",
+          "email": "octo@example.com",
+          "date": "2026-03-10T12:00:00Z"
+        },
+        "committer": {
+          "login": "github-actions[bot]",
+          "name": "GitHub Actions",
+          "email": "bot@example.com",
+          "date": "2026-03-10T12:01:00Z"
+        },
+        "parents": ["parent1"],
+        "url": "https://github.com/cli/cli/commit/abc123",
+        "api_url": "https://api.github.com/repos/cli/cli/commits/abc123"
+      },
+      {
+        "sha": "def456",
+        "message": "Second commit",
+        "author": {
+          "name": "Mona Lisa",
+          "email": "mona@example.com",
+          "date": "2026-03-09T10:00:00Z"
+        },
+        "committer": {
+          "name": "Mona Lisa",
+          "email": "mona@example.com",
+          "date": "2026-03-09T10:05:00Z"
+        },
+        "parents": ["parent2", "parent3"],
+        "url": "https://github.com/cli/cli/commit/def456",
+        "api_url": "https://api.github.com/repos/cli/cli/commits/def456"
+      }
+    ]
+  }
+}
+```
+
+결과는 GitHub API 응답 순서를 따르며, 일반적으로 최신 commit부터 내려옵니다.
+
 ## dry-run 출력
 
 `--dry-run`은 GitHub API를 호출하지 않고, 어떤 요청을 보낼지만 JSON으로 출력합니다.  
@@ -363,4 +447,7 @@ GitHub commit author와 Git author가 다를 수 있으므로 `author.login`은 
 - `issue` 또는 `pull_request`에서 `ref` 전달
 - `commit`에서 `ref` 누락
 - `commit`에서 `number` 전달
+- `commit_history`에서 `ref` 누락
+- `commit_history`에서 `number` 전달
+- `commit_history`에서 `limit`이 1 미만이거나 100 초과인 경우
 - GitHub API가 4xx/5xx를 반환한 경우

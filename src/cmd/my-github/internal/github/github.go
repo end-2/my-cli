@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,10 +15,12 @@ import (
 )
 
 const (
-	DefaultAPIBaseURL = "https://api.github.com/"
-	APIVersion        = "2022-11-28"
-	DefaultUserAgent  = "my-cli/my-github"
-	DefaultTimeout    = 15 * time.Second
+	DefaultAPIBaseURL   = "https://api.github.com/"
+	APIVersion          = "2022-11-28"
+	DefaultUserAgent    = "my-cli/my-github"
+	DefaultTimeout      = 15 * time.Second
+	DefaultHistoryLimit = 30
+	MaxHistoryLimit     = 100
 )
 
 type Request struct {
@@ -26,6 +29,7 @@ type Request struct {
 	Repo   string `json:"repo"`
 	Number int    `json:"number,omitempty"`
 	Ref    string `json:"ref,omitempty"`
+	Limit  *int   `json:"limit,omitempty"`
 }
 
 func ParseRequest(raw string) (Request, error) {
@@ -72,8 +76,20 @@ func (r *Request) normalize() error {
 		if r.Number != 0 {
 			return errors.New("json input field \"number\" is not allowed for kind \"commit\"")
 		}
+	case "commit_history":
+		if r.Ref == "" {
+			return errors.New("json input field \"ref\" is required for kind \"commit_history\"")
+		}
+
+		if r.Number != 0 {
+			return errors.New("json input field \"number\" is not allowed for kind \"commit_history\"")
+		}
+
+		if r.Limit != nil && (*r.Limit < 1 || *r.Limit > MaxHistoryLimit) {
+			return fmt.Errorf("json input field \"limit\" must be between 1 and %d for kind %q", MaxHistoryLimit, r.Kind)
+		}
 	default:
-		return fmt.Errorf("json input field \"kind\" must be one of %q, %q, or %q", "issue", "pull_request", "commit")
+		return fmt.Errorf("json input field \"kind\" must be one of %q, %q, %q, or %q", "issue", "pull_request", "commit", "commit_history")
 	}
 
 	return nil
@@ -83,6 +99,8 @@ func normalizeKind(kind string) string {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "pr", "pull-request", "pull_request":
 		return "pull_request"
+	case "commit-history", "commit_history":
+		return "commit_history"
 	default:
 		return strings.ToLower(strings.TrimSpace(kind))
 	}
@@ -179,6 +197,8 @@ func (c *Client) BuildRequest(input Request) (RequestPlan, error) {
 		path = fmt.Sprintf("repos/%s/%s/pulls/%d", url.PathEscape(input.Owner), url.PathEscape(input.Repo), input.Number)
 	case "commit":
 		path = fmt.Sprintf("repos/%s/%s/commits/%s", url.PathEscape(input.Owner), url.PathEscape(input.Repo), url.PathEscape(input.Ref))
+	case "commit_history":
+		path = fmt.Sprintf("repos/%s/%s/commits", url.PathEscape(input.Owner), url.PathEscape(input.Repo))
 	default:
 		return RequestPlan{}, fmt.Errorf("unsupported kind %q", input.Kind)
 	}
@@ -188,9 +208,16 @@ func (c *Client) BuildRequest(input Request) (RequestPlan, error) {
 		return RequestPlan{}, fmt.Errorf("build github api url: %w", err)
 	}
 
+	if input.Kind == "commit_history" {
+		query := endpoint.Query()
+		query.Set("sha", input.Ref)
+		query.Set("per_page", strconv.Itoa(historyLimit(input.Limit)))
+		endpoint.RawQuery = query.Encode()
+	}
+
 	return RequestPlan{
 		URL:  endpoint,
-		Path: path,
+		Path: endpoint.RequestURI(),
 	}, nil
 }
 
@@ -227,6 +254,8 @@ func (c *Client) Execute(plan RequestPlan, input Request) (any, error) {
 		return decodePullRequestOutput(resp.Body, input)
 	case "commit":
 		return decodeCommitOutput(resp.Body, input)
+	case "commit_history":
+		return decodeCommitHistoryOutput(resp.Body, input)
 	default:
 		return nil, fmt.Errorf("unsupported kind %q", input.Kind)
 	}
@@ -422,13 +451,20 @@ type commitEnvelope struct {
 	Commit     commitOutput     `json:"commit"`
 }
 
+type commitHistoryEnvelope struct {
+	Kind          string              `json:"kind"`
+	Repository    repositoryOutput    `json:"repository"`
+	CommitHistory commitHistoryOutput `json:"commit_history"`
+}
+
 type commitAPIResponse struct {
-	SHA     string          `json:"sha"`
-	URL     string          `json:"url"`
-	HTMLURL string          `json:"html_url"`
-	Author  *gitHubUser     `json:"author"`
-	Commit  gitCommitDetail `json:"commit"`
-	Parents []gitHubParent  `json:"parents"`
+	SHA       string          `json:"sha"`
+	URL       string          `json:"url"`
+	HTMLURL   string          `json:"html_url"`
+	Author    *gitHubUser     `json:"author"`
+	Committer *gitHubUser     `json:"committer"`
+	Commit    gitCommitDetail `json:"commit"`
+	Parents   []gitHubParent  `json:"parents"`
 }
 
 type gitCommitDetail struct {
@@ -465,6 +501,12 @@ type commitOutput struct {
 	APIURL    string       `json:"api_url"`
 }
 
+type commitHistoryOutput struct {
+	Ref     string         `json:"ref"`
+	Limit   int            `json:"limit"`
+	Commits []commitOutput `json:"commits"`
+}
+
 type commitPerson struct {
 	Login string `json:"login,omitempty"`
 	Name  string `json:"name"`
@@ -484,25 +526,63 @@ func decodeCommitOutput(body io.Reader, input Request) (commitEnvelope, error) {
 			Owner: input.Owner,
 			Repo:  input.Repo,
 		},
-		Commit: commitOutput{
-			SHA:     payload.SHA,
-			Message: payload.Commit.Message,
-			Author: commitPerson{
-				Login: loginOrEmpty(payload.Author),
-				Name:  payload.Commit.Author.Name,
-				Email: payload.Commit.Author.Email,
-				Date:  payload.Commit.Author.Date,
-			},
-			Committer: commitPerson{
-				Name:  payload.Commit.Committer.Name,
-				Email: payload.Commit.Committer.Email,
-				Date:  payload.Commit.Committer.Date,
-			},
-			Parents: collectParentSHAs(payload.Parents),
-			URL:     payload.HTMLURL,
-			APIURL:  payload.URL,
+		Commit: normalizeCommitOutput(payload),
+	}, nil
+}
+
+func decodeCommitHistoryOutput(body io.Reader, input Request) (commitHistoryEnvelope, error) {
+	var payload []commitAPIResponse
+	if err := json.NewDecoder(body).Decode(&payload); err != nil {
+		return commitHistoryEnvelope{}, fmt.Errorf("decode github commit history response: %w", err)
+	}
+
+	commits := make([]commitOutput, 0, len(payload))
+	for _, item := range payload {
+		commits = append(commits, normalizeCommitOutput(item))
+	}
+
+	return commitHistoryEnvelope{
+		Kind: "commit_history",
+		Repository: repositoryOutput{
+			Owner: input.Owner,
+			Repo:  input.Repo,
+		},
+		CommitHistory: commitHistoryOutput{
+			Ref:     input.Ref,
+			Limit:   historyLimit(input.Limit),
+			Commits: commits,
 		},
 	}, nil
+}
+
+func normalizeCommitOutput(payload commitAPIResponse) commitOutput {
+	return commitOutput{
+		SHA:     payload.SHA,
+		Message: payload.Commit.Message,
+		Author: commitPerson{
+			Login: loginOrEmpty(payload.Author),
+			Name:  payload.Commit.Author.Name,
+			Email: payload.Commit.Author.Email,
+			Date:  payload.Commit.Author.Date,
+		},
+		Committer: commitPerson{
+			Login: loginOrEmpty(payload.Committer),
+			Name:  payload.Commit.Committer.Name,
+			Email: payload.Commit.Committer.Email,
+			Date:  payload.Commit.Committer.Date,
+		},
+		Parents: collectParentSHAs(payload.Parents),
+		URL:     payload.HTMLURL,
+		APIURL:  payload.URL,
+	}
+}
+
+func historyLimit(limit *int) int {
+	if limit == nil {
+		return DefaultHistoryLimit
+	}
+
+	return *limit
 }
 
 func loginOrEmpty(user *gitHubUser) string {

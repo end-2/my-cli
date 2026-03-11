@@ -69,7 +69,7 @@ func TestRootCommandPrintsHelp(t *testing.T) {
 
 	output := stdout.String()
 	for _, expected := range []string{
-		"Query GitHub issues, pull requests, and commits",
+		"Query GitHub issues, pull requests, commits, and commit history",
 		"--dry-run",
 		"--version",
 		"my-github.yaml",
@@ -144,6 +144,56 @@ func TestRootCommandPrintsDryRunPlanUsingConfig(t *testing.T) {
 
 	if got := httpOutput["auth"]; got != "token" {
 		t.Fatalf("http.auth = %v, want %q", got, "token")
+	}
+
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
+func TestRootCommandPrintsDryRunPlanForCommitHistory(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := executeWithDependencies(
+		strings.NewReader(""),
+		&stdout,
+		&stderr,
+		[]string{"--dry-run", `{"kind":"commit_history","owner":"cli","repo":"cli","ref":"release/1.0","limit":2}`},
+		testDependencies("https://api.github.com", http.DefaultClient, ""),
+	)
+	if err != nil {
+		t.Fatalf("executeWithDependencies returned error: %v", err)
+	}
+
+	var output struct {
+		HTTP struct {
+			URL string `json:"url"`
+		} `json:"http"`
+		Request struct {
+			Kind  string `json:"kind"`
+			Ref   string `json:"ref"`
+			Limit int    `json:"limit"`
+		} `json:"request"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+		t.Fatalf("stdout is not valid json: %v", err)
+	}
+
+	if output.HTTP.URL != "https://api.github.com/repos/cli/cli/commits?per_page=2&sha=release%2F1.0" {
+		t.Fatalf("HTTP.URL = %q, want commit history URL", output.HTTP.URL)
+	}
+
+	if output.Request.Kind != "commit_history" {
+		t.Fatalf("Request.Kind = %q, want %q", output.Request.Kind, "commit_history")
+	}
+
+	if output.Request.Ref != "release/1.0" {
+		t.Fatalf("Request.Ref = %q, want %q", output.Request.Ref, "release/1.0")
+	}
+
+	if output.Request.Limit != 2 {
+		t.Fatalf("Request.Limit = %d, want %d", output.Request.Limit, 2)
 	}
 
 	if got := stderr.String(); got != "" {
@@ -356,6 +406,122 @@ func TestRootCommandFetchesCommitFromStdin(t *testing.T) {
 
 	if len(output.Commit.Parents) != 2 {
 		t.Fatalf("Commit.Parents = %v, want 2 parents", output.Commit.Parents)
+	}
+
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
+func TestRootCommandFetchesCommitHistory(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/cli/cli/commits" {
+			t.Fatalf("path = %q, want %q", r.URL.Path, "/repos/cli/cli/commits")
+		}
+
+		if got := r.URL.Query().Get("sha"); got != "release/1.0" {
+			t.Fatalf("sha = %q, want %q", got, "release/1.0")
+		}
+
+		if got := r.URL.Query().Get("per_page"); got != "2" {
+			t.Fatalf("per_page = %q, want %q", got, "2")
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[
+			{
+				"sha":"abc123",
+				"url":"https://api.github.com/repos/cli/cli/commits/abc123",
+				"html_url":"https://github.com/cli/cli/commit/abc123",
+				"author":{"login":"octocat"},
+				"committer":{"login":"github-actions[bot]"},
+				"commit":{
+					"author":{"name":"Octo Cat","email":"octo@example.com","date":"2026-03-10T12:00:00Z"},
+					"committer":{"name":"GitHub Actions","email":"bot@example.com","date":"2026-03-10T12:01:00Z"},
+					"message":"First commit"
+				},
+				"parents":[{"sha":"parent1"}]
+			},
+			{
+				"sha":"def456",
+				"url":"https://api.github.com/repos/cli/cli/commits/def456",
+				"html_url":"https://github.com/cli/cli/commit/def456",
+				"author":null,
+				"committer":null,
+				"commit":{
+					"author":{"name":"Mona Lisa","email":"mona@example.com","date":"2026-03-09T10:00:00Z"},
+					"committer":{"name":"Mona Lisa","email":"mona@example.com","date":"2026-03-09T10:05:00Z"},
+					"message":"Second commit"
+				},
+				"parents":[{"sha":"parent2"},{"sha":"parent3"}]
+			}
+		]`))
+	}))
+	t.Cleanup(server.Close)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := executeWithDependencies(
+		strings.NewReader(""),
+		&stdout,
+		&stderr,
+		[]string{`{"kind":"commit_history","owner":"cli","repo":"cli","ref":"release/1.0","limit":2}`},
+		testDependencies(server.URL, server.Client(), ""),
+	)
+	if err != nil {
+		t.Fatalf("executeWithDependencies returned error: %v", err)
+	}
+
+	var output struct {
+		Kind          string `json:"kind"`
+		CommitHistory struct {
+			Ref     string `json:"ref"`
+			Limit   int    `json:"limit"`
+			Commits []struct {
+				SHA       string   `json:"sha"`
+				Message   string   `json:"message"`
+				Parents   []string `json:"parents"`
+				Committer struct {
+					Login string `json:"login"`
+				} `json:"committer"`
+			} `json:"commits"`
+		} `json:"commit_history"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+		t.Fatalf("stdout is not valid json: %v", err)
+	}
+
+	if output.Kind != "commit_history" {
+		t.Fatalf("Kind = %q, want %q", output.Kind, "commit_history")
+	}
+
+	if output.CommitHistory.Ref != "release/1.0" {
+		t.Fatalf("CommitHistory.Ref = %q, want %q", output.CommitHistory.Ref, "release/1.0")
+	}
+
+	if output.CommitHistory.Limit != 2 {
+		t.Fatalf("CommitHistory.Limit = %d, want %d", output.CommitHistory.Limit, 2)
+	}
+
+	if len(output.CommitHistory.Commits) != 2 {
+		t.Fatalf("len(CommitHistory.Commits) = %d, want %d", len(output.CommitHistory.Commits), 2)
+	}
+
+	if output.CommitHistory.Commits[0].SHA != "abc123" {
+		t.Fatalf("CommitHistory.Commits[0].SHA = %q, want %q", output.CommitHistory.Commits[0].SHA, "abc123")
+	}
+
+	if output.CommitHistory.Commits[0].Committer.Login != "github-actions[bot]" {
+		t.Fatalf("CommitHistory.Commits[0].Committer.Login = %q, want %q", output.CommitHistory.Commits[0].Committer.Login, "github-actions[bot]")
+	}
+
+	if output.CommitHistory.Commits[1].Message != "Second commit" {
+		t.Fatalf("CommitHistory.Commits[1].Message = %q, want %q", output.CommitHistory.Commits[1].Message, "Second commit")
+	}
+
+	if len(output.CommitHistory.Commits[1].Parents) != 2 {
+		t.Fatalf("CommitHistory.Commits[1].Parents = %v, want 2 parents", output.CommitHistory.Commits[1].Parents)
 	}
 
 	if got := stderr.String(); got != "" {

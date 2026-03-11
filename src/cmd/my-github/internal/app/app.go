@@ -51,9 +51,9 @@ func (e *executor) newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "my-github '<json>'",
-		Short: "Query GitHub issues, pull requests, and commits",
+		Short: "Query GitHub issues, pull requests, commits, and commit history",
 		Long: strings.Join([]string{
-			"Query GitHub issues, pull requests, and commits.",
+			"Query GitHub issues, pull requests, commits, and commit history.",
 			"my-github queries the GitHub REST API with one JSON request.",
 			"Provide the JSON as a single argument or pipe it through stdin.",
 			"Configure base URL, timeout, user agent, and token with my-github.yaml via src/pkg/config.",
@@ -62,6 +62,7 @@ func (e *executor) newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 			`my-github '{"kind":"issue","owner":"cli","repo":"cli","number":123}'`,
 			`my-github '{"kind":"pull_request","owner":"cli","repo":"cli","number":456}'`,
 			`echo '{"kind":"commit","owner":"cli","repo":"cli","ref":"trunk"}' | my-github`,
+			`my-github '{"kind":"commit_history","owner":"cli","repo":"cli","ref":"trunk","limit":10}'`,
 			`my-github --dry-run '{"kind":"issue","owner":"cli","repo":"cli","number":123}'`,
 			`my-github --version`,
 			`my-github --help`,
