@@ -1,0 +1,366 @@
+# my-github
+
+`my-github`는 GitHub REST API에서 issue, pull request, commit 정보를 조회하는 단일 목적 CLI입니다.  
+입력은 JSON 객체 하나만 받으며, 결과도 JSON으로 출력합니다.
+
+이 커맨드는 `my-cli` 프로젝트의 일부이며, 빌드/테스트/린트는 모두 Docker 컨테이너에서 실행합니다.
+
+LLM/agent 환경에서 `my-github` binary를 활용하는 규칙은 [docs/my-github/SKILL.md](../../../docs/my-github/SKILL.md)를 참고합니다.
+
+## Requirements
+
+- Docker
+- GNU Make
+
+로컬에 Go나 `golangci-lint`를 직접 설치하지 않아도 됩니다.
+
+## Build
+
+저장소 루트에서 아래처럼 빌드합니다.
+
+```bash
+make build my-github
+make build CMD=my-github
+```
+
+자주 사용하는 옵션 예시는 아래와 같습니다.
+
+```bash
+make build my-github VERSION=1.0.0
+make build my-github GO_VERSION=1.26.1
+make build my-github CGO_ENABLED=1
+make build my-github GOOS=linux GOARCH=amd64
+make build my-github GOPRIVATE='github.com/your-org/*'
+```
+
+출력 파일은 `bin/my-github`에 생성됩니다.  
+빌드 시 `ldflags`로 `main.Version`에 `VERSION-git_commit` 값이 주입됩니다.
+
+```bash
+./bin/my-github --help
+./bin/my-github --dry-run '{"kind":"issue","owner":"cli","repo":"cli","number":123}'
+./bin/my-github --version
+./bin/my-github -version
+```
+
+## Test
+
+테스트는 `golang:<GO_VERSION>` Docker 이미지에서 실행합니다.
+
+```bash
+make test my-github
+make test CMD=my-github
+```
+
+추가 옵션도 전달할 수 있습니다.
+
+```bash
+make test my-github TEST_FLAGS="-v"
+make test my-github TEST_FLAGS="-run TestRootCommandFetchesIssue -v"
+```
+
+## Lint
+
+린트는 Docker 안에서 `golangci-lint`를 사용합니다. 기본 이미지는 `golangci/golangci-lint:v2.9.0`입니다.
+
+```bash
+make lint my-github
+make lint CMD=my-github
+```
+
+추가 옵션 예시는 아래와 같습니다.
+
+```bash
+make lint my-github LINT_FLAGS="--verbose"
+make lint my-github LINT_TIMEOUT=10m
+make lint my-github GOLANGCI_LINT_VERSION=2.9.0
+```
+
+## Helpful Commands
+
+```bash
+make list-cmds
+make print-version
+make clean
+```
+
+## 설정 파일
+
+설정 파일 이름은 `my-github.yaml`입니다.  
+설정은 [`src/pkg/config/config.go`](../../pkg/config/config.go) 로더를 통해 읽습니다.
+
+검색 경로는 아래 순서입니다.
+
+1. `/etc/my-github/my-github.yaml`
+2. `~/my-github.yaml`
+3. `./my-github.yaml`
+
+존재하는 파일은 위 순서대로 병합되며, 뒤에 읽은 값이 앞선 값을 덮어씁니다.  
+설정 파일이 하나도 없으면 아래 기본값으로 실행합니다.
+
+- `github.base_url`: `https://api.github.com/`
+- `github.timeout`: `15s`
+- `github.user_agent`: `my-cli/my-github`
+- `github.token`: 비어 있음
+
+예시입니다.
+
+```yaml
+github:
+  base_url: https://api.github.com/
+  timeout: 15s
+  user_agent: my-cli/my-github
+  token: "{{ .GITHUB_TOKEN }}"
+```
+
+`token` 같은 secret 값도 config 템플릿으로 관리합니다.  
+위 예시는 실행 시점 환경 변수 `GITHUB_TOKEN` 값을 읽어 token에 주입합니다.
+
+## 사용 방법
+
+JSON 입력은 둘 중 하나로 전달합니다.
+
+```bash
+./bin/my-github '{"kind":"issue","owner":"cli","repo":"cli","number":123}'
+```
+
+```bash
+echo '{"kind":"commit","owner":"cli","repo":"cli","ref":"trunk"}' | ./bin/my-github
+```
+
+지원 플래그는 아래와 같습니다.
+
+- `--version`, `-version`, `-v`
+- `--dry-run`, `-dry-run`, `-n`
+- `--help`, `-help`, `-h`
+
+## JSON 입력 공통 규칙
+
+- 입력은 JSON 객체 하나만 허용합니다.
+- 인자는 최대 1개만 받을 수 있습니다.
+- 알 수 없는 필드는 에러입니다.
+- `kind`, `owner`, `repo`는 항상 필요합니다.
+- 인증이 필요하면 `my-github.yaml`의 `github.token`에 값을 넣습니다.
+- 환경 변수 기반 secret 주입이 필요하면 `github.token: "{{ .GITHUB_TOKEN }}"` 형태를 사용합니다.
+
+## 공통 필드
+
+| 필드 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `kind` | string | 예 | 조회 대상 종류 |
+| `owner` | string | 예 | GitHub owner 또는 org |
+| `repo` | string | 예 | GitHub repository 이름 |
+| `number` | integer | 조건부 | `issue`, `pull_request` 조회 시 필요 |
+| `ref` | string | 조건부 | `commit` 조회 시 필요. SHA, branch, tag 모두 가능 |
+
+## kind 값
+
+| 값 | 설명 |
+| --- | --- |
+| `issue` | Issue 조회 |
+| `pull_request` | Pull Request 조회 |
+| `commit` | Commit 조회 |
+
+아래 별칭도 허용합니다.
+
+- `pr`
+- `pull-request`
+
+별칭을 넣어도 출력의 `kind` 값은 항상 `pull_request`로 정규화됩니다.
+
+## 종류별 스펙
+
+### 1. Issue
+
+입력 예시입니다.
+
+```json
+{
+  "kind": "issue",
+  "owner": "cli",
+  "repo": "cli",
+  "number": 123
+}
+```
+
+규칙입니다.
+
+- `number`는 1 이상의 정수여야 합니다.
+- `ref`는 허용되지 않습니다.
+- GitHub API가 pull request 항목을 반환하면 `issue`가 아니라 에러로 처리합니다.
+
+출력 예시입니다.
+
+```json
+{
+  "kind": "issue",
+  "repository": {
+    "owner": "cli",
+    "repo": "cli"
+  },
+  "issue": {
+    "number": 123,
+    "title": "Issue title",
+    "state": "open",
+    "author": "octocat",
+    "assignees": ["hubot"],
+    "labels": ["bug", "good first issue"],
+    "comments": 4,
+    "created_at": "2026-03-10T12:00:00Z",
+    "updated_at": "2026-03-11T12:00:00Z",
+    "closed_at": null,
+    "url": "https://github.com/cli/cli/issues/123",
+    "api_url": "https://api.github.com/repos/cli/cli/issues/123",
+    "body": "Issue body"
+  }
+}
+```
+
+`closed_at`은 닫히지 않은 이슈면 생략되거나 `null`일 수 있습니다.
+
+### 2. Pull Request
+
+입력 예시입니다.
+
+```json
+{
+  "kind": "pull_request",
+  "owner": "cli",
+  "repo": "cli",
+  "number": 456
+}
+```
+
+`pr`와 `pull-request`도 같은 의미입니다.
+
+규칙입니다.
+
+- `number`는 1 이상의 정수여야 합니다.
+- `ref`는 허용되지 않습니다.
+
+출력 예시입니다.
+
+```json
+{
+  "kind": "pull_request",
+  "repository": {
+    "owner": "cli",
+    "repo": "cli"
+  },
+  "pull_request": {
+    "number": 456,
+    "title": "PR title",
+    "state": "open",
+    "draft": false,
+    "merged": false,
+    "author": "monalisa",
+    "base_branch": "main",
+    "base_sha": "base-sha",
+    "head_branch": "feature",
+    "head_sha": "head-sha",
+    "created_at": "2026-03-10T12:00:00Z",
+    "updated_at": "2026-03-11T12:00:00Z",
+    "merged_at": null,
+    "url": "https://github.com/cli/cli/pull/456",
+    "api_url": "https://api.github.com/repos/cli/cli/pulls/456",
+    "body": "PR body"
+  }
+}
+```
+
+`merged_at`은 merge되지 않은 PR이면 생략되거나 `null`일 수 있습니다.
+
+### 3. Commit
+
+입력 예시입니다.
+
+```json
+{
+  "kind": "commit",
+  "owner": "cli",
+  "repo": "cli",
+  "ref": "trunk"
+}
+```
+
+규칙입니다.
+
+- `ref`는 비어 있으면 안 됩니다.
+- `ref`에는 SHA, branch, tag를 사용할 수 있습니다.
+- `number`는 허용되지 않습니다.
+
+출력 예시입니다.
+
+```json
+{
+  "kind": "commit",
+  "repository": {
+    "owner": "cli",
+    "repo": "cli"
+  },
+  "commit": {
+    "sha": "abc123",
+    "message": "Commit message",
+    "author": {
+      "login": "octocat",
+      "name": "Octo Cat",
+      "email": "octo@example.com",
+      "date": "2026-03-10T12:00:00Z"
+    },
+    "committer": {
+      "name": "Octo Bot",
+      "email": "bot@example.com",
+      "date": "2026-03-10T12:01:00Z"
+    },
+    "parents": ["parent1", "parent2"],
+    "url": "https://github.com/cli/cli/commit/abc123",
+    "api_url": "https://api.github.com/repos/cli/cli/commits/abc123"
+  }
+}
+```
+
+GitHub commit author와 Git author가 다를 수 있으므로 `author.login`은 없을 수도 있습니다.
+
+## dry-run 출력
+
+`--dry-run`은 GitHub API를 호출하지 않고, 어떤 요청을 보낼지만 JSON으로 출력합니다.  
+설정 파일에 `github.base_url` 또는 `github.token`이 있으면 그 값이 dry-run 결과에도 반영됩니다.
+
+```json
+{
+  "mode": "dry-run",
+  "http": {
+    "method": "GET",
+    "url": "https://api.github.com/repos/cli/cli/issues/123",
+    "auth": "token"
+  },
+  "request": {
+    "kind": "issue",
+    "owner": "cli",
+    "repo": "cli",
+    "number": 123
+  }
+}
+```
+
+`auth` 값은 아래 둘 중 하나입니다.
+
+- `token`
+- `none`
+
+## 에러 규칙
+
+아래 경우는 에러입니다.
+
+- JSON 문법 오류
+- JSON 객체가 아닌 입력
+- JSON 객체가 둘 이상 포함된 입력
+- 인자를 2개 이상 전달한 경우
+- 알 수 없는 필드 포함
+- `kind` 값 불일치
+- `owner` 또는 `repo` 누락
+- `issue` 또는 `pull_request`에서 `number` 누락 또는 0 이하
+- `issue` 또는 `pull_request`에서 `ref` 전달
+- `commit`에서 `ref` 누락
+- `commit`에서 `number` 전달
+- GitHub API가 4xx/5xx를 반환한 경우

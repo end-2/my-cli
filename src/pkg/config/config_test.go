@@ -247,6 +247,10 @@ func TestLoaderLoadReturnsErrorWhenNoConfigFilesExist(t *testing.T) {
 	if !strings.Contains(err.Error(), "no config file found") {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
+	if !IsConfigNotFound(err) {
+		t.Fatalf("IsConfigNotFound(%v) = false, want true", err)
+	}
 }
 
 func TestLoadFileReturnsErrorWhenConfigFileDoesNotExist(t *testing.T) {

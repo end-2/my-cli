@@ -1,0 +1,553 @@
+package github
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/end-2/my-cli/src/pkg/cliutil"
+)
+
+const (
+	DefaultAPIBaseURL = "https://api.github.com/"
+	APIVersion        = "2022-11-28"
+	DefaultUserAgent  = "my-cli/my-github"
+	DefaultTimeout    = 15 * time.Second
+)
+
+type Request struct {
+	Kind   string `json:"kind"`
+	Owner  string `json:"owner"`
+	Repo   string `json:"repo"`
+	Number int    `json:"number,omitempty"`
+	Ref    string `json:"ref,omitempty"`
+}
+
+func ParseRequest(raw string) (Request, error) {
+	request, err := cliutil.DecodeStrictJSON[Request](raw)
+	if err != nil {
+		return Request{}, err
+	}
+
+	if err := request.normalize(); err != nil {
+		return Request{}, err
+	}
+
+	return request, nil
+}
+
+func (r *Request) normalize() error {
+	r.Kind = normalizeKind(r.Kind)
+	r.Owner = strings.TrimSpace(r.Owner)
+	r.Repo = strings.TrimSpace(r.Repo)
+	r.Ref = strings.TrimSpace(r.Ref)
+
+	if r.Owner == "" {
+		return errors.New("json input field \"owner\" is required")
+	}
+
+	if r.Repo == "" {
+		return errors.New("json input field \"repo\" is required")
+	}
+
+	switch r.Kind {
+	case "issue", "pull_request":
+		if r.Number <= 0 {
+			return fmt.Errorf("json input field \"number\" must be greater than zero for kind %q", r.Kind)
+		}
+
+		if r.Ref != "" {
+			return fmt.Errorf("json input field \"ref\" is not allowed for kind %q", r.Kind)
+		}
+	case "commit":
+		if r.Ref == "" {
+			return errors.New("json input field \"ref\" is required for kind \"commit\"")
+		}
+
+		if r.Number != 0 {
+			return errors.New("json input field \"number\" is not allowed for kind \"commit\"")
+		}
+	default:
+		return fmt.Errorf("json input field \"kind\" must be one of %q, %q, or %q", "issue", "pull_request", "commit")
+	}
+
+	return nil
+}
+
+func normalizeKind(kind string) string {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "pr", "pull-request", "pull_request":
+		return "pull_request"
+	default:
+		return strings.ToLower(strings.TrimSpace(kind))
+	}
+}
+
+type ClientConfig struct {
+	BaseURL   string
+	Token     string
+	Timeout   time.Duration
+	UserAgent string
+}
+
+func DefaultClientConfig() ClientConfig {
+	return ClientConfig{
+		BaseURL:   DefaultAPIBaseURL,
+		Timeout:   DefaultTimeout,
+		UserAgent: DefaultUserAgent,
+	}
+}
+
+func (c ClientConfig) withDefaults() ClientConfig {
+	config := DefaultClientConfig()
+
+	if value := strings.TrimSpace(c.BaseURL); value != "" {
+		config.BaseURL = value
+	}
+
+	if value := strings.TrimSpace(c.Token); value != "" {
+		config.Token = value
+	}
+
+	if value := strings.TrimSpace(c.UserAgent); value != "" {
+		config.UserAgent = value
+	}
+
+	if c.Timeout > 0 {
+		config.Timeout = c.Timeout
+	}
+
+	return config
+}
+
+type Client struct {
+	baseURL    *url.URL
+	httpClient *http.Client
+	token      string
+	userAgent  string
+}
+
+func NewClient(config ClientConfig, httpClient *http.Client) (*Client, error) {
+	config = config.withDefaults()
+
+	if !strings.HasSuffix(config.BaseURL, "/") {
+		config.BaseURL += "/"
+	}
+
+	baseURL, err := url.Parse(config.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse github api base url: %w", err)
+	}
+
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: config.Timeout}
+	}
+
+	return &Client{
+		baseURL:    baseURL,
+		httpClient: httpClient,
+		token:      config.Token,
+		userAgent:  config.UserAgent,
+	}, nil
+}
+
+func (c *Client) AuthMode() string {
+	if c.token != "" {
+		return "token"
+	}
+
+	return "none"
+}
+
+type RequestPlan struct {
+	URL  *url.URL
+	Path string
+}
+
+func (c *Client) BuildRequest(input Request) (RequestPlan, error) {
+	var path string
+
+	switch input.Kind {
+	case "issue":
+		path = fmt.Sprintf("repos/%s/%s/issues/%d", url.PathEscape(input.Owner), url.PathEscape(input.Repo), input.Number)
+	case "pull_request":
+		path = fmt.Sprintf("repos/%s/%s/pulls/%d", url.PathEscape(input.Owner), url.PathEscape(input.Repo), input.Number)
+	case "commit":
+		path = fmt.Sprintf("repos/%s/%s/commits/%s", url.PathEscape(input.Owner), url.PathEscape(input.Repo), url.PathEscape(input.Ref))
+	default:
+		return RequestPlan{}, fmt.Errorf("unsupported kind %q", input.Kind)
+	}
+
+	endpoint, err := c.baseURL.Parse(path)
+	if err != nil {
+		return RequestPlan{}, fmt.Errorf("build github api url: %w", err)
+	}
+
+	return RequestPlan{
+		URL:  endpoint,
+		Path: path,
+	}, nil
+}
+
+func (c *Client) Execute(plan RequestPlan, input Request) (any, error) {
+	req, err := http.NewRequest(http.MethodGet, plan.URL.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("create github api request: %w", err)
+	}
+
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", c.userAgent)
+	req.Header.Set("X-GitHub-Api-Version", APIVersion)
+
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("call github api %s: %w", plan.Path, err)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	if resp.StatusCode >= http.StatusBadRequest {
+		return nil, decodeAPIError(resp, plan.Path)
+	}
+
+	switch input.Kind {
+	case "issue":
+		return decodeIssueOutput(resp.Body, input)
+	case "pull_request":
+		return decodePullRequestOutput(resp.Body, input)
+	case "commit":
+		return decodeCommitOutput(resp.Body, input)
+	default:
+		return nil, fmt.Errorf("unsupported kind %q", input.Kind)
+	}
+}
+
+type apiError struct {
+	Message          string `json:"message"`
+	DocumentationURL string `json:"documentation_url"`
+}
+
+func decodeAPIError(resp *http.Response, path string) error {
+	var apiErr apiError
+	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
+		return fmt.Errorf("github api %s returned %s", path, resp.Status)
+	}
+
+	if apiErr.Message == "" {
+		return fmt.Errorf("github api %s returned %s", path, resp.Status)
+	}
+
+	if apiErr.DocumentationURL != "" {
+		return fmt.Errorf("github api %s returned %s: %s (%s)", path, resp.Status, apiErr.Message, apiErr.DocumentationURL)
+	}
+
+	return fmt.Errorf("github api %s returned %s: %s", path, resp.Status, apiErr.Message)
+}
+
+type repositoryOutput struct {
+	Owner string `json:"owner"`
+	Repo  string `json:"repo"`
+}
+
+type issueEnvelope struct {
+	Kind       string           `json:"kind"`
+	Repository repositoryOutput `json:"repository"`
+	Issue      issueOutput      `json:"issue"`
+}
+
+type issueAPIResponse struct {
+	URL         string               `json:"url"`
+	HTMLURL     string               `json:"html_url"`
+	Number      int                  `json:"number"`
+	Title       string               `json:"title"`
+	State       string               `json:"state"`
+	Body        string               `json:"body"`
+	Comments    int                  `json:"comments"`
+	User        gitHubUser           `json:"user"`
+	Assignees   []gitHubUser         `json:"assignees"`
+	Labels      []gitHubLabel        `json:"labels"`
+	CreatedAt   string               `json:"created_at"`
+	UpdatedAt   string               `json:"updated_at"`
+	ClosedAt    *string              `json:"closed_at"`
+	PullRequest *issuePullRequestRef `json:"pull_request"`
+}
+
+type issuePullRequestRef struct {
+	URL string `json:"url"`
+}
+
+type issueOutput struct {
+	Number    int      `json:"number"`
+	Title     string   `json:"title"`
+	State     string   `json:"state"`
+	Author    string   `json:"author"`
+	Assignees []string `json:"assignees"`
+	Labels    []string `json:"labels"`
+	Comments  int      `json:"comments"`
+	CreatedAt string   `json:"created_at"`
+	UpdatedAt string   `json:"updated_at"`
+	ClosedAt  *string  `json:"closed_at,omitempty"`
+	URL       string   `json:"url"`
+	APIURL    string   `json:"api_url"`
+	Body      string   `json:"body"`
+}
+
+func decodeIssueOutput(body io.Reader, input Request) (issueEnvelope, error) {
+	var payload issueAPIResponse
+	if err := json.NewDecoder(body).Decode(&payload); err != nil {
+		return issueEnvelope{}, fmt.Errorf("decode github issue response: %w", err)
+	}
+
+	if payload.PullRequest != nil {
+		return issueEnvelope{}, fmt.Errorf("github item %s/%s#%d is a pull request, not an issue", input.Owner, input.Repo, input.Number)
+	}
+
+	return issueEnvelope{
+		Kind: "issue",
+		Repository: repositoryOutput{
+			Owner: input.Owner,
+			Repo:  input.Repo,
+		},
+		Issue: issueOutput{
+			Number:    payload.Number,
+			Title:     payload.Title,
+			State:     payload.State,
+			Author:    payload.User.Login,
+			Assignees: collectUserLogins(payload.Assignees),
+			Labels:    collectLabelNames(payload.Labels),
+			Comments:  payload.Comments,
+			CreatedAt: payload.CreatedAt,
+			UpdatedAt: payload.UpdatedAt,
+			ClosedAt:  payload.ClosedAt,
+			URL:       payload.HTMLURL,
+			APIURL:    payload.URL,
+			Body:      payload.Body,
+		},
+	}, nil
+}
+
+type pullRequestEnvelope struct {
+	Kind        string            `json:"kind"`
+	Repository  repositoryOutput  `json:"repository"`
+	PullRequest pullRequestOutput `json:"pull_request"`
+}
+
+type pullRequestAPIResponse struct {
+	URL       string     `json:"url"`
+	HTMLURL   string     `json:"html_url"`
+	Number    int        `json:"number"`
+	Title     string     `json:"title"`
+	State     string     `json:"state"`
+	Body      string     `json:"body"`
+	Draft     bool       `json:"draft"`
+	Merged    bool       `json:"merged"`
+	User      gitHubUser `json:"user"`
+	Base      gitHubRef  `json:"base"`
+	Head      gitHubRef  `json:"head"`
+	CreatedAt string     `json:"created_at"`
+	UpdatedAt string     `json:"updated_at"`
+	MergedAt  *string    `json:"merged_at"`
+}
+
+type gitHubRef struct {
+	Ref string `json:"ref"`
+	SHA string `json:"sha"`
+}
+
+type pullRequestOutput struct {
+	Number     int     `json:"number"`
+	Title      string  `json:"title"`
+	State      string  `json:"state"`
+	Draft      bool    `json:"draft"`
+	Merged     bool    `json:"merged"`
+	Author     string  `json:"author"`
+	BaseBranch string  `json:"base_branch"`
+	BaseSHA    string  `json:"base_sha"`
+	HeadBranch string  `json:"head_branch"`
+	HeadSHA    string  `json:"head_sha"`
+	CreatedAt  string  `json:"created_at"`
+	UpdatedAt  string  `json:"updated_at"`
+	MergedAt   *string `json:"merged_at,omitempty"`
+	URL        string  `json:"url"`
+	APIURL     string  `json:"api_url"`
+	Body       string  `json:"body"`
+}
+
+func decodePullRequestOutput(body io.Reader, input Request) (pullRequestEnvelope, error) {
+	var payload pullRequestAPIResponse
+	if err := json.NewDecoder(body).Decode(&payload); err != nil {
+		return pullRequestEnvelope{}, fmt.Errorf("decode github pull request response: %w", err)
+	}
+
+	return pullRequestEnvelope{
+		Kind: "pull_request",
+		Repository: repositoryOutput{
+			Owner: input.Owner,
+			Repo:  input.Repo,
+		},
+		PullRequest: pullRequestOutput{
+			Number:     payload.Number,
+			Title:      payload.Title,
+			State:      payload.State,
+			Draft:      payload.Draft,
+			Merged:     payload.Merged,
+			Author:     payload.User.Login,
+			BaseBranch: payload.Base.Ref,
+			BaseSHA:    payload.Base.SHA,
+			HeadBranch: payload.Head.Ref,
+			HeadSHA:    payload.Head.SHA,
+			CreatedAt:  payload.CreatedAt,
+			UpdatedAt:  payload.UpdatedAt,
+			MergedAt:   payload.MergedAt,
+			URL:        payload.HTMLURL,
+			APIURL:     payload.URL,
+			Body:       payload.Body,
+		},
+	}, nil
+}
+
+type commitEnvelope struct {
+	Kind       string           `json:"kind"`
+	Repository repositoryOutput `json:"repository"`
+	Commit     commitOutput     `json:"commit"`
+}
+
+type commitAPIResponse struct {
+	SHA     string          `json:"sha"`
+	URL     string          `json:"url"`
+	HTMLURL string          `json:"html_url"`
+	Author  *gitHubUser     `json:"author"`
+	Commit  gitCommitDetail `json:"commit"`
+	Parents []gitHubParent  `json:"parents"`
+}
+
+type gitCommitDetail struct {
+	Author    gitIdentity `json:"author"`
+	Committer gitIdentity `json:"committer"`
+	Message   string      `json:"message"`
+}
+
+type gitIdentity struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+	Date  string `json:"date"`
+}
+
+type gitHubParent struct {
+	SHA string `json:"sha"`
+}
+
+type gitHubUser struct {
+	Login string `json:"login"`
+}
+
+type gitHubLabel struct {
+	Name string `json:"name"`
+}
+
+type commitOutput struct {
+	SHA       string       `json:"sha"`
+	Message   string       `json:"message"`
+	Author    commitPerson `json:"author"`
+	Committer commitPerson `json:"committer"`
+	Parents   []string     `json:"parents"`
+	URL       string       `json:"url"`
+	APIURL    string       `json:"api_url"`
+}
+
+type commitPerson struct {
+	Login string `json:"login,omitempty"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+	Date  string `json:"date"`
+}
+
+func decodeCommitOutput(body io.Reader, input Request) (commitEnvelope, error) {
+	var payload commitAPIResponse
+	if err := json.NewDecoder(body).Decode(&payload); err != nil {
+		return commitEnvelope{}, fmt.Errorf("decode github commit response: %w", err)
+	}
+
+	return commitEnvelope{
+		Kind: "commit",
+		Repository: repositoryOutput{
+			Owner: input.Owner,
+			Repo:  input.Repo,
+		},
+		Commit: commitOutput{
+			SHA:     payload.SHA,
+			Message: payload.Commit.Message,
+			Author: commitPerson{
+				Login: loginOrEmpty(payload.Author),
+				Name:  payload.Commit.Author.Name,
+				Email: payload.Commit.Author.Email,
+				Date:  payload.Commit.Author.Date,
+			},
+			Committer: commitPerson{
+				Name:  payload.Commit.Committer.Name,
+				Email: payload.Commit.Committer.Email,
+				Date:  payload.Commit.Committer.Date,
+			},
+			Parents: collectParentSHAs(payload.Parents),
+			URL:     payload.HTMLURL,
+			APIURL:  payload.URL,
+		},
+	}, nil
+}
+
+func loginOrEmpty(user *gitHubUser) string {
+	if user == nil {
+		return ""
+	}
+
+	return user.Login
+}
+
+func collectUserLogins(users []gitHubUser) []string {
+	logins := make([]string, 0, len(users))
+	for _, user := range users {
+		if user.Login == "" {
+			continue
+		}
+
+		logins = append(logins, user.Login)
+	}
+
+	return logins
+}
+
+func collectLabelNames(labels []gitHubLabel) []string {
+	names := make([]string, 0, len(labels))
+	for _, label := range labels {
+		if label.Name == "" {
+			continue
+		}
+
+		names = append(names, label.Name)
+	}
+
+	return names
+}
+
+func collectParentSHAs(parents []gitHubParent) []string {
+	shas := make([]string, 0, len(parents))
+	for _, parent := range parents {
+		if parent.SHA == "" {
+			continue
+		}
+
+		shas = append(shas, parent.SHA)
+	}
+
+	return shas
+}

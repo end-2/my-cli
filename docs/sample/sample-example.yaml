@@ -1,0 +1,2 @@
+message: Hello {{ .USER }}
+dry_run_message: "Dry run: would print Hello from sample.yaml"

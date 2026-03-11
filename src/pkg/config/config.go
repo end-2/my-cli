@@ -19,6 +19,7 @@ const (
 )
 
 var ErrInvalidTarget = errors.New("config target must be a non-nil pointer")
+var ErrConfigNotFound = errors.New("no config file found")
 
 type Loader struct {
 	appName        string
@@ -77,6 +78,10 @@ func LoadFile(file string, target any) error {
 	return New(file).Load(target)
 }
 
+func IsConfigNotFound(err error) bool {
+	return errors.Is(err, ErrConfigNotFound)
+}
+
 func (l *Loader) Load(target any) error {
 	if err := validateTarget(target); err != nil {
 		return err
@@ -123,7 +128,7 @@ func (l *Loader) loadMerged(target any) error {
 	}
 
 	if len(loadedPaths) == 0 {
-		return fmt.Errorf("no config file found in any of %s", strings.Join(candidatePaths(candidates), ", "))
+		return fmt.Errorf("%w in any of %s", ErrConfigNotFound, strings.Join(candidatePaths(candidates), ", "))
 	}
 
 	if err := v.Unmarshal(target); err != nil {

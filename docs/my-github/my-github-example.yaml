@@ -1,0 +1,5 @@
+github:
+  base_url: https://api.github.com/
+  timeout: 15s
+  user_agent: my-cli/my-github
+  token: "{{ .GITHUB_TOKEN }}"
