@@ -364,7 +364,26 @@ func TestRootCommandFetchesCommitFromStdin(t *testing.T) {
 				"committer":{"name":"Octo Bot","email":"bot@example.com","date":"2026-03-10T12:01:00Z"},
 				"message":"Commit message"
 			},
-			"parents":[{"sha":"parent1"},{"sha":"parent2"}]
+			"parents":[{"sha":"parent1"},{"sha":"parent2"}],
+			"stats":{"additions":12,"deletions":3,"total":15},
+			"files":[
+				{
+					"filename":"README.md",
+					"status":"modified",
+					"additions":10,
+					"deletions":2,
+					"changes":12,
+					"patch":"@@ -1 +1 @@\\n-old\\n+new"
+				},
+				{
+					"filename":"docs/old.md",
+					"previous_filename":"docs/legacy.md",
+					"status":"renamed",
+					"additions":2,
+					"deletions":1,
+					"changes":3
+				}
+			]
 		}`))
 	}))
 	t.Cleanup(server.Close)
@@ -390,6 +409,18 @@ func TestRootCommandFetchesCommitFromStdin(t *testing.T) {
 				Login string `json:"login"`
 			} `json:"author"`
 			Parents []string `json:"parents"`
+			Stats   struct {
+				Additions int `json:"additions"`
+				Deletions int `json:"deletions"`
+				Total     int `json:"total"`
+			} `json:"stats"`
+			Files []struct {
+				Filename         string `json:"filename"`
+				Status           string `json:"status"`
+				Changes          int    `json:"changes"`
+				PreviousFilename string `json:"previous_filename"`
+				Patch            string `json:"patch"`
+			} `json:"files"`
 		} `json:"commit"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
@@ -406,6 +437,26 @@ func TestRootCommandFetchesCommitFromStdin(t *testing.T) {
 
 	if len(output.Commit.Parents) != 2 {
 		t.Fatalf("Commit.Parents = %v, want 2 parents", output.Commit.Parents)
+	}
+
+	if output.Commit.Stats.Total != 15 {
+		t.Fatalf("Commit.Stats.Total = %d, want %d", output.Commit.Stats.Total, 15)
+	}
+
+	if len(output.Commit.Files) != 2 {
+		t.Fatalf("len(Commit.Files) = %d, want %d", len(output.Commit.Files), 2)
+	}
+
+	if output.Commit.Files[0].Filename != "README.md" {
+		t.Fatalf("Commit.Files[0].Filename = %q, want %q", output.Commit.Files[0].Filename, "README.md")
+	}
+
+	if output.Commit.Files[0].Patch == "" {
+		t.Fatal("Commit.Files[0].Patch is empty, want patch content")
+	}
+
+	if output.Commit.Files[1].PreviousFilename != "docs/legacy.md" {
+		t.Fatalf("Commit.Files[1].PreviousFilename = %q, want %q", output.Commit.Files[1].PreviousFilename, "docs/legacy.md")
 	}
 
 	if got := stderr.String(); got != "" {

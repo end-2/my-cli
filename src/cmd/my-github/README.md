@@ -43,6 +43,17 @@ make build my-github GOPRIVATE='github.com/your-org/*'
 ./bin/my-github -version
 ```
 
+## Install into Codex
+
+Codex CLI에서 바로 쓰려면 저장소 루트에서 아래 스크립트를 실행합니다.
+
+```bash
+./scripts/install-my-github-codex.sh
+```
+
+이 스크립트는 `make build CMD=my-github` 실행 후 `~/.codex/bin/my-github`와 `~/.codex/skills/my-github/*`를 함께 갱신합니다.  
+다른 Codex 홈을 쓰면 `CODEX_HOME=/path/to/codex ./scripts/install-my-github-codex.sh`처럼 실행하면 됩니다.
+
 ## Test
 
 테스트는 `golang:<GO_VERSION>` Docker 이미지에서 실행합니다.
@@ -102,6 +113,12 @@ make clean
 - `github.timeout`: `15s`
 - `github.user_agent`: `my-cli/my-github`
 - `github.token`: 비어 있음
+- `github.by_base_url`: 비어 있음
+
+`github` 최상위 값은 공통 기본값입니다.  
+`github.by_base_url[].alias`는 사람 읽기용 식별자입니다. 어떤 GitHub 인스턴스용 override인지 바로 구분할 때 씁니다.  
+선택된 `github.base_url`과 일치하는 `github.by_base_url[].base_url` 항목이 있으면 해당 항목의 `token`, `timeout`, `user_agent`가 마지막에 덮어씌워집니다.  
+`base_url` 비교는 뒤쪽 `/` 유무를 무시하며, 실제 선택은 `alias`가 아니라 `base_url`로 이뤄집니다.
 
 예시입니다.
 
@@ -110,11 +127,20 @@ github:
   base_url: https://api.github.com/
   timeout: 15s
   user_agent: my-cli/my-github
-  token: "{{ .GITHUB_TOKEN }}"
+  by_base_url:
+    - alias: github.com
+      base_url: https://api.github.com/
+      token: "{{ .GITHUB_TOKEN }}"
+    - alias: example-ghe
+      base_url: https://ghe.example.com/api/v3/
+      token: "{{ .GHE_TOKEN }}"
+      timeout: 30s
+      user_agent: my-cli/my-github-enterprise
 ```
 
 `token` 같은 secret 값도 config 템플릿으로 관리합니다.  
-위 예시는 실행 시점 환경 변수 `GITHUB_TOKEN` 값을 읽어 token에 주입합니다.
+위 예시는 실행 시점 환경 변수 `GITHUB_TOKEN`, `GHE_TOKEN` 값을 읽어 각 base URL에 맞는 token에 주입합니다.  
+여러 GitHub 인스턴스를 함께 쓸 때는 `github.base_url`만 바꾸면 대응하는 override가 자동으로 적용되고, `alias`로 어떤 항목인지 빠르게 구분할 수 있습니다.
 
 ## 사용 방법
 
@@ -144,8 +170,8 @@ echo '{"kind":"commit","owner":"cli","repo":"cli","ref":"trunk"}' | ./bin/my-git
 - 인자는 최대 1개만 받을 수 있습니다.
 - 알 수 없는 필드는 에러입니다.
 - `kind`, `owner`, `repo`는 항상 필요합니다.
-- 인증이 필요하면 `my-github.yaml`의 `github.token`에 값을 넣습니다.
-- 환경 변수 기반 secret 주입이 필요하면 `github.token: "{{ .GITHUB_TOKEN }}"` 형태를 사용합니다.
+- 인증이 필요하면 `my-github.yaml`의 `github.token` 또는 선택된 `github.by_base_url[].token`에 값을 넣습니다.
+- 환경 변수 기반 secret 주입이 필요하면 `github.token` 또는 `github.by_base_url[].token`에 `{{ .GITHUB_TOKEN }}` 같은 템플릿을 사용합니다.
 
 ## 공통 필드
 
@@ -320,6 +346,29 @@ echo '{"kind":"commit","owner":"cli","repo":"cli","ref":"trunk"}' | ./bin/my-git
       "date": "2026-03-10T12:01:00Z"
     },
     "parents": ["parent1", "parent2"],
+    "stats": {
+      "additions": 12,
+      "deletions": 3,
+      "total": 15
+    },
+    "files": [
+      {
+        "filename": "README.md",
+        "status": "modified",
+        "additions": 10,
+        "deletions": 2,
+        "changes": 12,
+        "patch": "@@ -1 +1 @@\n-old\n+new"
+      },
+      {
+        "filename": "docs/old.md",
+        "status": "renamed",
+        "additions": 2,
+        "deletions": 1,
+        "changes": 3,
+        "previous_filename": "docs/legacy.md"
+      }
+    ],
     "url": "https://github.com/cli/cli/commit/abc123",
     "api_url": "https://api.github.com/repos/cli/cli/commits/abc123"
   }
@@ -327,6 +376,7 @@ echo '{"kind":"commit","owner":"cli","repo":"cli","ref":"trunk"}' | ./bin/my-git
 ```
 
 GitHub commit author와 Git author가 다를 수 있으므로 `author.login`은 없을 수도 있습니다.
+`files[].patch`는 binary 파일이거나 diff가 너무 크면 비어 있거나 생략될 수 있습니다.
 
 ### 4. Commit History
 
@@ -408,7 +458,7 @@ GitHub commit author와 Git author가 다를 수 있으므로 `author.login`은 
 ## dry-run 출력
 
 `--dry-run`은 GitHub API를 호출하지 않고, 어떤 요청을 보낼지만 JSON으로 출력합니다.  
-설정 파일에 `github.base_url` 또는 `github.token`이 있으면 그 값이 dry-run 결과에도 반영됩니다.
+설정 파일의 `github.base_url`, `github.token`, `github.by_base_url`를 합쳐 계산한 최종 값이 dry-run 결과에도 반영됩니다.
 
 ```json
 {

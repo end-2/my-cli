@@ -121,6 +121,27 @@ func DefaultClientConfig() ClientConfig {
 	}
 }
 
+func NormalizeBaseURL(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", errors.New("parse github api base url: empty value")
+	}
+
+	baseURL, err := url.Parse(value)
+	if err != nil {
+		return "", fmt.Errorf("parse github api base url: %w", err)
+	}
+
+	switch {
+	case baseURL.Path == "":
+		baseURL.Path = "/"
+	case !strings.HasSuffix(baseURL.Path, "/"):
+		baseURL.Path += "/"
+	}
+
+	return baseURL.String(), nil
+}
+
 func (c ClientConfig) withDefaults() ClientConfig {
 	config := DefaultClientConfig()
 
@@ -153,11 +174,12 @@ type Client struct {
 func NewClient(config ClientConfig, httpClient *http.Client) (*Client, error) {
 	config = config.withDefaults()
 
-	if !strings.HasSuffix(config.BaseURL, "/") {
-		config.BaseURL += "/"
+	normalizedBaseURL, err := NormalizeBaseURL(config.BaseURL)
+	if err != nil {
+		return nil, err
 	}
 
-	baseURL, err := url.Parse(config.BaseURL)
+	baseURL, err := url.Parse(normalizedBaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse github api base url: %w", err)
 	}
@@ -465,6 +487,8 @@ type commitAPIResponse struct {
 	Committer *gitHubUser     `json:"committer"`
 	Commit    gitCommitDetail `json:"commit"`
 	Parents   []gitHubParent  `json:"parents"`
+	Stats     *gitCommitStats `json:"stats"`
+	Files     []gitCommitFile `json:"files"`
 }
 
 type gitCommitDetail struct {
@@ -487,18 +511,36 @@ type gitHubUser struct {
 	Login string `json:"login"`
 }
 
+type gitCommitStats struct {
+	Additions int `json:"additions"`
+	Deletions int `json:"deletions"`
+	Total     int `json:"total"`
+}
+
+type gitCommitFile struct {
+	Filename         string `json:"filename"`
+	Status           string `json:"status"`
+	Additions        int    `json:"additions"`
+	Deletions        int    `json:"deletions"`
+	Changes          int    `json:"changes"`
+	PreviousFilename string `json:"previous_filename"`
+	Patch            string `json:"patch"`
+}
+
 type gitHubLabel struct {
 	Name string `json:"name"`
 }
 
 type commitOutput struct {
-	SHA       string       `json:"sha"`
-	Message   string       `json:"message"`
-	Author    commitPerson `json:"author"`
-	Committer commitPerson `json:"committer"`
-	Parents   []string     `json:"parents"`
-	URL       string       `json:"url"`
-	APIURL    string       `json:"api_url"`
+	SHA       string             `json:"sha"`
+	Message   string             `json:"message"`
+	Author    commitPerson       `json:"author"`
+	Committer commitPerson       `json:"committer"`
+	Parents   []string           `json:"parents"`
+	Stats     *commitStatsOutput `json:"stats,omitempty"`
+	Files     []commitFileOutput `json:"files,omitempty"`
+	URL       string             `json:"url"`
+	APIURL    string             `json:"api_url"`
 }
 
 type commitHistoryOutput struct {
@@ -512,6 +554,22 @@ type commitPerson struct {
 	Name  string `json:"name"`
 	Email string `json:"email"`
 	Date  string `json:"date"`
+}
+
+type commitStatsOutput struct {
+	Additions int `json:"additions"`
+	Deletions int `json:"deletions"`
+	Total     int `json:"total"`
+}
+
+type commitFileOutput struct {
+	Filename         string `json:"filename"`
+	Status           string `json:"status"`
+	Additions        int    `json:"additions"`
+	Deletions        int    `json:"deletions"`
+	Changes          int    `json:"changes"`
+	PreviousFilename string `json:"previous_filename,omitempty"`
+	Patch            string `json:"patch,omitempty"`
 }
 
 func decodeCommitOutput(body io.Reader, input Request) (commitEnvelope, error) {
@@ -556,7 +614,7 @@ func decodeCommitHistoryOutput(body io.Reader, input Request) (commitHistoryEnve
 }
 
 func normalizeCommitOutput(payload commitAPIResponse) commitOutput {
-	return commitOutput{
+	output := commitOutput{
 		SHA:     payload.SHA,
 		Message: payload.Commit.Message,
 		Author: commitPerson{
@@ -575,6 +633,20 @@ func normalizeCommitOutput(payload commitAPIResponse) commitOutput {
 		URL:     payload.HTMLURL,
 		APIURL:  payload.URL,
 	}
+
+	if payload.Stats != nil {
+		output.Stats = &commitStatsOutput{
+			Additions: payload.Stats.Additions,
+			Deletions: payload.Stats.Deletions,
+			Total:     payload.Stats.Total,
+		}
+	}
+
+	if len(payload.Files) > 0 {
+		output.Files = normalizeCommitFiles(payload.Files)
+	}
+
+	return output
 }
 
 func historyLimit(limit *int) int {
@@ -617,6 +689,23 @@ func collectLabelNames(labels []gitHubLabel) []string {
 	}
 
 	return names
+}
+
+func normalizeCommitFiles(files []gitCommitFile) []commitFileOutput {
+	output := make([]commitFileOutput, 0, len(files))
+	for _, file := range files {
+		output = append(output, commitFileOutput{
+			Filename:         file.Filename,
+			Status:           file.Status,
+			Additions:        file.Additions,
+			Deletions:        file.Deletions,
+			Changes:          file.Changes,
+			PreviousFilename: file.PreviousFilename,
+			Patch:            file.Patch,
+		})
+	}
+
+	return output
 }
 
 func collectParentSHAs(parents []gitHubParent) []string {

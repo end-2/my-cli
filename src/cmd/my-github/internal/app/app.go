@@ -56,7 +56,7 @@ func (e *executor) newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 			"Query GitHub issues, pull requests, commits, and commit history.",
 			"my-github queries the GitHub REST API with one JSON request.",
 			"Provide the JSON as a single argument or pipe it through stdin.",
-			"Configure base URL, timeout, user agent, and token with my-github.yaml via src/pkg/config.",
+			"Configure base URL, per-base-url overrides, timeout, user agent, and token with my-github.yaml via src/pkg/config.",
 		}, "\n"),
 		Example: strings.Join([]string{
 			`my-github '{"kind":"issue","owner":"cli","repo":"cli","number":123}'`,

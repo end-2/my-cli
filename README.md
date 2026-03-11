@@ -37,49 +37,23 @@ make build my-github
 
 ### Codex CLI에서 my-github 사용
 
-`my-github`를 실제 Codex CLI에서 사용하려면 binary를 Codex가 실행할 수 있는 경로에 두고, skill 파일을 `~/.codex/skills` 아래에 배치합니다.
+`my-github`를 실제 Codex CLI에서 사용하려면 설치 스크립트를 실행합니다.
 
 ```bash
-make build my-github
-
-mkdir -p ~/.codex/bin ~/.codex/skills/my-github
-cp ./bin/my-github ~/.codex/bin/my-github
-chmod +x ~/.codex/bin/my-github
-
-cp ./docs/my-github/SKILL.md ~/.codex/skills/my-github/SKILL.md
-cp ./docs/my-github/my-github-example.yaml ~/.codex/skills/my-github/my-github-example.yaml
+./scripts/install-my-github-codex.sh
 ```
 
-셸에서 `~/.codex/bin`이 `PATH`에 없다면 예를 들어 `~/.zshrc`에 아래를 추가합니다.
+`my-github`의 설정 파일은 `${HOME}/my-github.yaml`입니다.
+다음 명령어를 통해 필요한 내용을 수정해주세요.
 
 ```bash
-export PATH="$HOME/.codex/bin:$PATH"
+vi ${HOME}/my-github.yaml
 ```
 
-설정 파일까지 함께 준비하려면 예시 파일을 홈 디렉터리의 `~/my-github.yaml`로 복사합니다. 이 위치는 작업 디렉터리와 상관없이 항상 읽히므로 Codex CLI에서 쓰기 가장 단순합니다.
+`my-github` 연결 확인은 아래처럼 `--dry-run`으로 시작하는 편이 안전합니다.
 
 ```bash
-cp ./docs/my-github/my-github-example.yaml ~/my-github.yaml
-```
-
-기본 GitHub.com을 쓰면 `base_url`은 그대로 두고, `token`은 템플릿 그대로 유지한 뒤 셸 환경 변수만 넣으면 됩니다.
-
-```bash
-export GITHUB_TOKEN=ghp_xxx
-```
-
-지속적으로 사용하려면 예를 들어 `~/.zshrc`에 아래를 추가합니다.
-
-```bash
-export GITHUB_TOKEN=ghp_xxx
-```
-
-반영 후 새 셸을 열거나 `source ~/.zshrc`를 실행하고 Codex CLI를 다시 시작하면 `~/.codex/skills/my-github/SKILL.md`와 `~/my-github.yaml`을 기준으로 `my-github` skill을 사용할 수 있습니다.
-
-연결 확인은 아래처럼 `--dry-run`으로 시작하는 편이 안전합니다.
-
-```bash
-my-github --dry-run '{"kind":"issue","owner":"cli","repo":"cli","number":123}'
+${CODEX_HOME}/bin/my-github --dry-run '{"kind":"issue","owner":"cli","repo":"cli","number":123}'
 ```
 
 Codex CLI 프롬프트에서는 `my-github`를 직접 언급하면 skill이 더 안정적으로 선택됩니다. 예시는 아래와 같습니다.

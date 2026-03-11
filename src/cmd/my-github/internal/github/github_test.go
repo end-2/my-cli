@@ -78,6 +78,17 @@ func TestBuildRequestCommitHistoryUsesDefaultLimit(t *testing.T) {
 	}
 }
 
+func TestNormalizeBaseURLAppendsTrailingSlash(t *testing.T) {
+	baseURL, err := NormalizeBaseURL("https://ghe.example.com/api/v3")
+	if err != nil {
+		t.Fatalf("NormalizeBaseURL returned error: %v", err)
+	}
+
+	if baseURL != "https://ghe.example.com/api/v3/" {
+		t.Fatalf("baseURL = %q, want trailing slash", baseURL)
+	}
+}
+
 func intPtr(value int) *int {
 	return &value
 }

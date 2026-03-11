@@ -2,4 +2,12 @@ github:
   base_url: https://api.github.com/
   timeout: 15s
   user_agent: my-cli/my-github
-  token: "{{ .GITHUB_TOKEN }}"
+  by_base_url:
+    - alias: github.com
+      base_url: https://api.github.com/
+      token: "{{ .GITHUB_TOKEN }}"
+    - alias: example-ghe
+      base_url: https://ghe.example.com/api/v3/
+      token: "{{ .GHE_TOKEN }}"
+      timeout: 30s
+      user_agent: my-cli/my-github-enterprise
