@@ -1,39 +1,49 @@
 # MY-CLI
 
-`my-cli`는 개인적으로 사용하는 커스텀 CLI 도구를 만들기 위한 Go 프로젝트입니다.
+`my-cli` is a Go project for building custom CLI tools that I use personally.
 
-이 프로젝트의 CLI는 **AI / LLM 기반 CLI 환경에서 사용하기 쉽게 설계**되었습니다.
+The CLIs in this project are designed to be easy to use in AI / LLM-powered CLI environments.
 
-특징은 다음과 같습니다.
+Key characteristics:
 
-- 모든 입출력은 **JSON 기반 인터페이스**
-- **AI Agent가 직접 호출하기 쉬운 단일 실행 CLI**
-- **Codex CLI 같은 AI CLI에서 skill 형태로 사용 가능**
-- 사람과 AI가 모두 사용할 수 있는 **Stable CLI contract**
+- All input and output use a JSON-based interface
+- Single-purpose executables that AI agents can call directly
+- Can be used as skills in AI CLIs such as Codex CLI
+- A stable CLI contract that works for both humans and AI
 
 ## CLI List
 
 ### my-github
 
-`my-github`는 GitHub REST API에서 issue, pull request, commit 정보를 JSON 입력/출력으로 조회하는 CLI입니다.
-자세한 사용법은 [src/cmd/my-github/README.md](src/cmd/my-github/README.md)를 참고하세요.
+`my-github` is a CLI that fetches issue, pull request, and commit information from the GitHub REST API through JSON input/output.
+See [src/cmd/my-github/README.md](src/cmd/my-github/README.md) for detailed usage.
 
 ### my-slack
 
-`my-slack`는 Slack Web API에 create, read, update, delete, list 성격의 요청을 JSON 입력/출력으로 보내는 CLI입니다.
-자세한 사용법은 [src/cmd/my-slack/README.md](src/cmd/my-slack/README.md)를 참고하세요.
+`my-slack` is a CLI that sends create, read, update, delete, and list style requests to the Slack Web API through JSON input/output.
+See [src/cmd/my-slack/README.md](src/cmd/my-slack/README.md) for detailed usage.
+
+### my-prom
+
+`my-prom` is a CLI that sends instant query, range query, series lookup, label name lookup, and label value lookup requests to the Prometheus HTTP API through JSON input/output.
+See [src/cmd/my-prom/README.md](src/cmd/my-prom/README.md) for detailed usage.
+
+### my-discord
+
+`my-discord` is a CLI that sends create, read, update, delete, and list style requests to the Discord REST API through JSON input/output.
+See [src/cmd/my-discord/README.md](src/cmd/my-discord/README.md) for detailed usage.
 
 ## Requirements
 
 - Docker
 - GNU Make
 
-로컬에 `Go`나 `golangci-lint`를 직접 설치하지 않아도 됩니다.
+You do not need to install `Go` or `golangci-lint` locally.
 
 ## Build
 
-빌드는 `golang:<GO_VERSION>` Docker 이미지를 사용합니다.
-출력 파일은 `bin/<command>`에 생성됩니다.
+Builds use the `golang:<GO_VERSION>` Docker image.
+The output binary is created at `bin/<command>`.
 
 ```bash
 # sample
@@ -48,86 +58,148 @@ make build my-github
 ./bin/sample --version
 ```
 
-### Codex CLI에서 my-github 사용
+### Use my-github in Codex CLI
 
-`my-github`를 실제 Codex CLI에서 사용하려면 설치 스크립트를 실행합니다.
+To use `my-github` directly from Codex CLI, run the installation script.
 
 ```bash
 ./scripts/install-my-github-codex.sh
 ```
 
-`my-github`의 설정 파일은 `${HOME}/my-github.yaml`입니다.
-다음 명령어를 통해 필요한 내용을 수정해주세요.
+The config file for `my-github` is `${HOME}/.config/my-github.yaml`.
+Edit it as needed with the following command.
 
 ```bash
-vi ${HOME}/my-github.yaml
+vi ${HOME}/.config/my-github.yaml
 ```
 
-`my-github` 연결 확인은 아래처럼 `--dry-run`으로 시작하는 편이 안전합니다.
+It is safest to verify connectivity by starting with `--dry-run`, like this.
 
 ```bash
 ${CODEX_HOME}/bin/my-github --dry-run '{"kind":"issue","owner":"cli","repo":"cli","number":123}'
 ```
 
-Codex CLI 프롬프트에서는 `my-github`를 직접 언급하면 skill이 더 안정적으로 선택됩니다. 예시는 아래와 같습니다.
+Mentioning `my-github` directly in a Codex CLI prompt helps the skill get selected more reliably. Examples:
 
 ```text
-my-github를 사용해서 cli/cli 저장소의 issue #123을 조회하고 제목, 상태, 작성자만 요약해줘.
+Use my-github to fetch issue #123 from the cli/cli repository and summarize only the title, state, and author.
 
-my-github skill로 openai/openai-python 저장소의 pull request #456을 조회해서 핵심 변경사항을 3줄로 정리해줘.
+Use the my-github skill to fetch pull request #456 from the openai/openai-python repository and summarize the key changes in 3 lines.
 
-my-github를 사용해서 cli/cli 저장소의 trunk ref commit 정보를 조회하고 SHA, 작성자, 메시지를 알려줘.
+Use my-github to fetch the commit for the trunk ref in the cli/cli repository and tell me the SHA, author, and message.
 ```
 
-### Codex CLI에서 my-slack 사용
+### Use my-slack in Codex CLI
 
-`my-slack`를 실제 Codex CLI에서 사용하려면 설치 스크립트를 실행합니다.
+To use `my-slack` directly from Codex CLI, run the installation script.
 
 ```bash
 ./scripts/install-my-slack-codex.sh
 ```
 
-`my-slack`의 설정 파일은 `${HOME}/my-slack.yaml`입니다.
-다음 명령어를 통해 필요한 내용을 수정해주세요.
+The config file for `my-slack` is `${HOME}/.config/my-slack.yaml`.
+Edit it as needed with the following command.
 
 ```bash
-vi ${HOME}/my-slack.yaml
+vi ${HOME}/.config/my-slack.yaml
 ```
 
-`my-slack` 연결 확인은 아래처럼 `--dry-run`으로 시작하는 편이 안전합니다.
+It is safest to verify connectivity by starting with `--dry-run`, like this.
 
 ```bash
 ${CODEX_HOME}/bin/my-slack --dry-run '{"kind":"read","method":"conversations.info","args":{"channel":"C12345678"}}'
 ```
 
-Codex CLI 프롬프트에서는 `my-slack`를 직접 언급하면 skill이 더 안정적으로 선택됩니다. 예시는 아래와 같습니다.
+Mentioning `my-slack` directly in a Codex CLI prompt helps the skill get selected more reliably. Examples:
 
 ```text
-my-slack를 사용해서 conversations.info로 C12345678 채널 정보를 조회해줘.
+Use my-slack to fetch channel information for C12345678 with conversations.info.
 
-my-slack skill로 users.list를 호출해서 사용자 목록을 20개만 가져와줘.
+Use the my-slack skill to call users.list and return only 20 users.
 
-my-slack를 사용해서 chat.postMessage dry-run 결과를 먼저 보여줘.
+Use my-slack and show me the dry-run result for chat.postMessage first.
+```
+
+### Use my-prom in Codex CLI
+
+To use `my-prom` directly from Codex CLI, run the installation script.
+
+```bash
+./scripts/install-my-prom-codex.sh
+```
+
+The config file for `my-prom` is `${HOME}/.config/my-prom.yaml`.
+Edit it as needed with the following command.
+
+```bash
+vi ${HOME}/.config/my-prom.yaml
+```
+
+It is safest to verify connectivity by starting with `--dry-run`, like this.
+
+```bash
+${CODEX_HOME}/bin/my-prom --dry-run '{"kind":"query","query":"up"}'
+```
+
+Mentioning `my-prom` directly in a Codex CLI prompt helps the skill get selected more reliably. Examples:
+
+```text
+Use my-prom to fetch the current up metric result and summarize the status by instance.
+
+Use the my-prom skill to fetch rate(http_requests_total[5m]) for the last hour, then show only the number of result series and the latest 3 values from the first series.
+
+Use my-prom to fetch 50 __name__ label values and tell me which metric names are available.
+```
+
+### Use my-discord in Codex CLI
+
+To use `my-discord` directly from Codex CLI, run the installation script.
+
+```bash
+./scripts/install-my-discord-codex.sh
+```
+
+The config file for `my-discord` is `${HOME}/.config/my-discord.yaml`.
+Edit it as needed with the following command.
+
+```bash
+vi ${HOME}/.config/my-discord.yaml
+```
+
+It is safest to verify connectivity by starting with `--dry-run`, like this.
+
+```bash
+${CODEX_HOME}/bin/my-discord --dry-run '{"kind":"read","path":"/channels/123"}'
+```
+
+Mentioning `my-discord` directly in a Codex CLI prompt helps the skill get selected more reliably. Examples:
+
+```text
+Use my-discord to fetch the /channels/123 path.
+
+Use the my-discord skill to fetch 50 items from /guilds/123/members and paginate by user.id.
+
+Use my-discord and show me the dry-run result for a create request to /channels/123/messages first.
 ```
 
 ## Test
 
-테스트는 `golang:<GO_VERSION>` Docker 이미지에서 `go test`를 실행합니다.
+Tests run `go test` inside the `golang:<GO_VERSION>` Docker image.
 
-전체 테스트입니다.
+This runs the full test suite.
 
 ```bash
 make test
 ```
 
-특정 커맨드만 테스트할 수도 있습니다.
+You can also run tests for a specific command.
 
 ```bash
 make test sample
 make test CMD=sample
 ```
 
-추가 옵션도 전달할 수 있습니다.
+You can pass additional options as well.
 
 ```bash
 make test TEST_FLAGS="-v"
@@ -136,23 +208,23 @@ make test sample TEST_FLAGS="-run TestName -v"
 
 ## Lint
 
-린트는 Docker 안에서 `golangci-lint`를 사용합니다.
-기본 이미지는 `golangci/golangci-lint:v2.9.0`입니다.
+Linting uses `golangci-lint` inside Docker.
+The default image is `golangci/golangci-lint:v2.9.0`.
 
-전체 린트입니다.
+This lints the entire repository.
 
 ```bash
 make lint
 ```
 
-특정 커맨드만 린트할 수도 있습니다.
+You can also lint a specific command.
 
 ```bash
 make lint sample
 make lint CMD=sample
 ```
 
-추가 옵션 예시는 아래와 같습니다.
+Additional option examples:
 
 ```bash
 make lint LINT_FLAGS="--verbose"
@@ -162,19 +234,19 @@ make lint GOLANGCI_LINT_VERSION=2.9.0
 
 ## Helpful Commands
 
-빌드 가능한 커맨드 목록 확인입니다.
+Show the list of buildable commands.
 
 ```bash
 make list-cmds
 ```
 
-현재 버전 문자열 확인입니다.
+Check the current version string.
 
 ```bash
 make print-version
 ```
 
-빌드 산출물과 캐시 정리입니다.
+Remove build outputs and caches.
 
 ```bash
 make clean

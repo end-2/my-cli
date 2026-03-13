@@ -3,9 +3,9 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: scripts/install-my-github-codex.sh
+Usage: scripts/install-my-prom-codex.sh
 
-Builds my-github and installs the binary and skill assets into CODEX_HOME.
+Builds my-prom and installs the binary and skill assets into CODEX_HOME.
 
 Environment:
   CODEX_HOME  Target Codex home directory. Defaults to $HOME/.codex.
@@ -32,9 +32,9 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 CODEX_HOME="${CODEX_HOME:-${HOME}/.codex}"
 
-SKILL_NAME="my-github"
+SKILL_NAME="my-prom"
 SOURCE_SKILL_PATH="${REPO_ROOT}/docs/${SKILL_NAME}/SKILL.md"
-SOURCE_EXAMPLE_PATH="${REPO_ROOT}/docs/${SKILL_NAME}/my-github-example.yaml"
+SOURCE_EXAMPLE_PATH="${REPO_ROOT}/docs/${SKILL_NAME}/my-prom-example.yaml"
 SOURCE_README_PATH="${REPO_ROOT}/src/cmd/${SKILL_NAME}/README.md"
 BUILT_BINARY_PATH="${REPO_ROOT}/bin/${SKILL_NAME}"
 INSTALL_BIN_DIR="${CODEX_HOME}/bin"
@@ -42,7 +42,7 @@ INSTALL_BIN_PATH="${INSTALL_BIN_DIR}/${SKILL_NAME}"
 INSTALL_SKILL_DIR="${CODEX_HOME}/skills/${SKILL_NAME}"
 INSTALL_SKILL_PATH="${INSTALL_SKILL_DIR}/SKILL.md"
 INSTALL_CONFIG_DIR="${HOME}/.config"
-INSTALL_CONFIG_PATH="${INSTALL_CONFIG_DIR}/my-github.yaml"
+INSTALL_CONFIG_PATH="${INSTALL_CONFIG_DIR}/my-prom.yaml"
 
 require_file() {
   local path="$1"
@@ -55,13 +55,12 @@ require_file() {
 
 render_skill() {
   local tmp_path
-  tmp_path="$(mktemp "${TMPDIR:-/tmp}/my-github-skill.XXXXXX")"
+  tmp_path="$(mktemp "${TMPDIR:-/tmp}/my-prom-skill.XXXXXX")"
 
-  # Render the installed skill with paths that still work after copying it out of the repo.
-  MY_GITHUB_BIN_PATH="${INSTALL_BIN_PATH}" MY_GITHUB_README_PATH="${SOURCE_README_PATH}" perl -0pe '
-    s/If it is not on `PATH`, use the provided absolute binary path\./sprintf(q{If it is not on `PATH`, use `%s`.}, $ENV{MY_GITHUB_BIN_PATH})/e;
-    s{If you need build, test, or lint instructions, read \[README\.md\]\(\.\./\.\./src/cmd/my-github/README\.md\)\.}{sprintf(q{If you need build, test, or lint instructions, read `%s`.}, $ENV{MY_GITHUB_README_PATH})}e;
-    s/If the binary is not on `PATH`, replace `my-github` with the provided absolute path\./sprintf(q{If the binary is not on `PATH`, replace `my-github` with `%s`.}, $ENV{MY_GITHUB_BIN_PATH})/e;
+  MY_PROM_BIN_PATH="${INSTALL_BIN_PATH}" MY_PROM_README_PATH="${SOURCE_README_PATH}" perl -0pe '
+    s/If it is not on `PATH`, use the provided absolute binary path\./sprintf(q{If it is not on `PATH`, use `%s`.}, $ENV{MY_PROM_BIN_PATH})/e;
+    s{If you need build, test, or lint instructions, read \[README\.md\]\(\.\./\.\./src/cmd/my-prom/README\.md\)\.}{sprintf(q{If you need build, test, or lint instructions, read `%s`.}, $ENV{MY_PROM_README_PATH})}e;
+    s/If the binary is not on `PATH`, replace `my-prom` with the provided absolute path\./sprintf(q{If the binary is not on `PATH`, replace `my-prom` with `%s`.}, $ENV{MY_PROM_BIN_PATH})/e;
   ' "${SOURCE_SKILL_PATH}" > "${tmp_path}"
 
   install -m 0644 "${tmp_path}" "${INSTALL_SKILL_PATH}"
@@ -93,4 +92,4 @@ render_skill
 printf 'Installed binary: %s\n' "${INSTALL_BIN_PATH}"
 printf 'Installed skill: %s\n' "${INSTALL_SKILL_PATH}"
 printf '%s example config: %s\n' "${config_status}" "${INSTALL_CONFIG_PATH}"
-printf 'Add %s to PATH if you want to run my-github directly from the shell.\n' "${INSTALL_BIN_DIR}"
+printf 'Add %s to PATH if you want to run my-prom directly from the shell.\n' "${INSTALL_BIN_DIR}"

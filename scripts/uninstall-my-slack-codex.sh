@@ -33,7 +33,7 @@ CODEX_HOME="${CODEX_HOME:-${HOME}/.codex}"
 SKILL_NAME="my-slack"
 INSTALL_BIN_PATH="${CODEX_HOME}/bin/${SKILL_NAME}"
 INSTALL_SKILL_DIR="${CODEX_HOME}/skills/${SKILL_NAME}"
-INSTALL_CONFIG_PATH="${HOME}/my-slack.yaml"
+INSTALL_CONFIG_PATH="${HOME}/.config/my-slack.yaml"
 
 remove_file() {
   local path="$1"

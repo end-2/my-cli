@@ -7,7 +7,7 @@ description: Use the `my-slack` CLI to call Slack Web API create, read, update, 
 
 This skill uses the `my-slack` binary to call Slack Web API methods from a single JSON request. Prefer it over ad hoc REST calls when you want predictable JSON input, `--dry-run` support, config-based token selection, and cursor-aware list pagination.
 
-In Codex CLI installs, the binary lives under `${CODEX_HOME}/bin/my-slack` and the config file lives under `${HOME}/my-slack.yaml`. If it is not on `PATH`, use the provided absolute binary path.
+In Codex CLI installs, the binary lives under `${CODEX_HOME}/bin/my-slack` and the config file lives under `${HOME}/.config/my-slack.yaml`. If it is not on `PATH`, use the provided absolute binary path.
 
 ## When to use
 

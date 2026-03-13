@@ -3,9 +3,9 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: scripts/uninstall-my-github-codex.sh
+Usage: scripts/uninstall-my-discord-codex.sh
 
-Removes the my-github binary and skill assets from CODEX_HOME.
+Removes the my-discord binary and skill assets from CODEX_HOME.
 
 Environment:
   CODEX_HOME  Target Codex home directory. Defaults to $HOME/.codex.
@@ -30,10 +30,10 @@ fi
 
 CODEX_HOME="${CODEX_HOME:-${HOME}/.codex}"
 
-SKILL_NAME="my-github"
+SKILL_NAME="my-discord"
 INSTALL_BIN_PATH="${CODEX_HOME}/bin/${SKILL_NAME}"
 INSTALL_SKILL_DIR="${CODEX_HOME}/skills/${SKILL_NAME}"
-INSTALL_CONFIG_PATH="${HOME}/.config/my-github.yaml"
+INSTALL_CONFIG_PATH="${HOME}/.config/my-discord.yaml"
 
 remove_file() {
   local path="$1"

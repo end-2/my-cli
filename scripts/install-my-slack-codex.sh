@@ -41,7 +41,8 @@ INSTALL_BIN_DIR="${CODEX_HOME}/bin"
 INSTALL_BIN_PATH="${INSTALL_BIN_DIR}/${SKILL_NAME}"
 INSTALL_SKILL_DIR="${CODEX_HOME}/skills/${SKILL_NAME}"
 INSTALL_SKILL_PATH="${INSTALL_SKILL_DIR}/SKILL.md"
-INSTALL_CONFIG_PATH="${HOME}/my-slack.yaml"
+INSTALL_CONFIG_DIR="${HOME}/.config"
+INSTALL_CONFIG_PATH="${INSTALL_CONFIG_DIR}/my-slack.yaml"
 
 require_file() {
   local path="$1"
@@ -75,7 +76,7 @@ printf 'Building %s...\n' "${SKILL_NAME}"
 make -C "${REPO_ROOT}" build CMD="${SKILL_NAME}"
 require_file "${BUILT_BINARY_PATH}"
 
-mkdir -p "${INSTALL_BIN_DIR}" "${INSTALL_SKILL_DIR}"
+mkdir -p "${INSTALL_BIN_DIR}" "${INSTALL_SKILL_DIR}" "${INSTALL_CONFIG_DIR}"
 
 install -m 0755 "${BUILT_BINARY_PATH}" "${INSTALL_BIN_PATH}"
 

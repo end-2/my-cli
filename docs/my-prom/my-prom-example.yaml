@@ -1,0 +1,12 @@
+prometheus:
+  base_url: http://localhost:9090/
+  timeout: 15s
+  user_agent: my-cli/my-prom
+  instances:
+    - alias: local-prom
+      base_url: http://localhost:9090/
+    - alias: prod-prom
+      base_url: https://prom.example.com/
+      token: "{{ .PROM_PROD_TOKEN }}"
+      timeout: 30s
+      user_agent: my-cli/my-prom-prod

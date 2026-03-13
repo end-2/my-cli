@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	DefaultFileName = "config.yaml"
-	defaultEtcDir   = "/etc"
+	DefaultFileName      = "config.yaml"
+	defaultEtcDir        = "/etc"
+	defaultHomeConfigDir = ".config"
 )
 
 var ErrInvalidTarget = errors.New("config target must be a non-nil pointer")
@@ -190,7 +191,7 @@ func (l *Loader) searchPaths(appName string) ([]string, error) {
 
 	return []string{
 		filepath.Join(l.etcDir, appName, l.file),
-		filepath.Join(homeDir, l.file),
+		filepath.Join(homeDir, defaultHomeConfigDir, l.file),
 		filepath.Join(currentDir, l.file),
 	}, nil
 }

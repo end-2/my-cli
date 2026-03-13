@@ -1,0 +1,12 @@
+discord:
+  base_url: https://discord.com/api/v10/
+  timeout: 15s
+  user_agent: DiscordBot (https://github.com/end-2/my-cli, 1.0) my-cli/my-discord
+  token_type: Bot
+  bots:
+    - alias: bot-dev
+      token: "{{ .DISCORD_DEV_BOT_TOKEN }}"
+    - alias: bot-prod
+      token: "{{ .DISCORD_PROD_BOT_TOKEN }}"
+      timeout: 30s
+      user_agent: DiscordBot (https://github.com/end-2/my-cli, 1.0) my-cli/my-discord-prod

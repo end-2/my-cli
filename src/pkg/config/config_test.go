@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -95,7 +96,7 @@ feature:
   enabled: true
 `)
 
-	writeConfigFile(t, homeDir, DefaultFileName, `
+	writeConfigFile(t, filepath.Join(homeDir, defaultHomeConfigDir), DefaultFileName, `
 app:
   port: 8000
 log:
@@ -152,7 +153,7 @@ feature:
   enabled: true
 `)
 
-	writeConfigFile(t, homeDir, DefaultFileName, `
+	writeConfigFile(t, filepath.Join(homeDir, defaultHomeConfigDir), DefaultFileName, `
 app:
   port: 8000
   name: {{ .APP_NAME }}
@@ -229,6 +230,32 @@ app:
 
 	if cfg.App.Name != "from-executable" {
 		t.Fatalf("App.Name = %q, want %q", cfg.App.Name, "from-executable")
+	}
+}
+
+func TestLoaderSearchPathsUseHomeConfigDirectory(t *testing.T) {
+	currentDir := t.TempDir()
+	homeDir := t.TempDir()
+	etcDir := t.TempDir()
+
+	loader := NewForApp("sample", DefaultFileName)
+	loader.currentDir = func() (string, error) { return currentDir, nil }
+	loader.homeDir = func() (string, error) { return homeDir, nil }
+	loader.etcDir = etcDir
+
+	got, err := loader.searchPaths("sample")
+	if err != nil {
+		t.Fatalf("searchPaths returned error: %v", err)
+	}
+
+	want := []string{
+		filepath.Join(etcDir, "sample", DefaultFileName),
+		filepath.Join(homeDir, defaultHomeConfigDir, DefaultFileName),
+		filepath.Join(currentDir, DefaultFileName),
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("searchPaths = %v, want %v", got, want)
 	}
 }
 

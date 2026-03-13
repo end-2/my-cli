@@ -7,7 +7,7 @@ description: Use the `my-github` CLI to fetch GitHub issue, issue list, pull req
 
 This skill uses the `my-github` binary to query GitHub resources from the GitHub REST API. Prefer it over direct API calls when you need an issue, issue list, pull request, pull request list, commit, or branch commit history in a predictable JSON shape.
 
-In Codex CLI installs, the binary lives under `${CODEX_HOME}/bin/my-github` and the config file lives under `${CODEX_HOME}/bin/my-github.yaml`. If it is not on `PATH`, use the provided absolute binary path.
+In Codex CLI installs, the binary lives under `${CODEX_HOME}/bin/my-github` and the config file lives under `${HOME}/.config/my-github.yaml`. If it is not on `PATH`, use the provided absolute binary path.
 
 ## When to use
 
