@@ -1,7 +1,14 @@
 # MY-CLI
 
 `my-cli`는 개인적으로 사용하는 커스텀 CLI 도구를 만들기 위한 Go 프로젝트입니다.
-빌드, 테스트, 린트는 모두 Docker 컨테이너에서 실행합니다.
+이 프로젝트의 CLI는 **AI / LLM 기반 CLI 환경에서 사용하기 쉽게 설계**되었습니다.
+
+특징은 다음과 같습니다.
+
+- 모든 입출력은 **JSON 기반 인터페이스**
+- **AI Agent가 직접 호출하기 쉬운 단일 실행 CLI**
+- **Codex CLI 같은 AI CLI에서 skill 형태로 사용 가능**
+- 사람과 AI가 모두 사용할 수 있는 **Stable CLI contract**
 
 ## CLI List
 
