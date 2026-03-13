@@ -1,0 +1,11 @@
+slack:
+  base_url: https://slack.com/api/
+  timeout: 15s
+  user_agent: my-cli/my-slack
+  workspaces:
+    - alias: workspace-dev
+      token: "{{ .SLACK_DEV_BOT_TOKEN }}"
+    - alias: workspace-prod
+      token: "{{ .SLACK_PROD_BOT_TOKEN }}"
+      timeout: 30s
+      user_agent: my-cli/my-slack-prod

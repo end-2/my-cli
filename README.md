@@ -10,6 +10,11 @@
 `my-github`는 GitHub REST API에서 issue, pull request, commit 정보를 JSON 입력/출력으로 조회하는 CLI입니다.
 자세한 사용법은 [src/cmd/my-github/README.md](src/cmd/my-github/README.md)를 참고하세요.
 
+### my-slack
+
+`my-slack`는 Slack Web API에 create, read, update, delete, list 성격의 요청을 JSON 입력/출력으로 보내는 CLI입니다.
+자세한 사용법은 [src/cmd/my-slack/README.md](src/cmd/my-slack/README.md)를 참고하세요.
+
 ## Requirements
 
 - Docker
@@ -64,6 +69,37 @@ my-github를 사용해서 cli/cli 저장소의 issue #123을 조회하고 제목
 my-github skill로 openai/openai-python 저장소의 pull request #456을 조회해서 핵심 변경사항을 3줄로 정리해줘.
 
 my-github를 사용해서 cli/cli 저장소의 trunk ref commit 정보를 조회하고 SHA, 작성자, 메시지를 알려줘.
+```
+
+### Codex CLI에서 my-slack 사용
+
+`my-slack`를 실제 Codex CLI에서 사용하려면 설치 스크립트를 실행합니다.
+
+```bash
+./scripts/install-my-slack-codex.sh
+```
+
+`my-slack`의 설정 파일은 `${HOME}/my-slack.yaml`입니다.
+다음 명령어를 통해 필요한 내용을 수정해주세요.
+
+```bash
+vi ${HOME}/my-slack.yaml
+```
+
+`my-slack` 연결 확인은 아래처럼 `--dry-run`으로 시작하는 편이 안전합니다.
+
+```bash
+${CODEX_HOME}/bin/my-slack --dry-run '{"kind":"read","method":"conversations.info","args":{"channel":"C12345678"}}'
+```
+
+Codex CLI 프롬프트에서는 `my-slack`를 직접 언급하면 skill이 더 안정적으로 선택됩니다. 예시는 아래와 같습니다.
+
+```text
+my-slack를 사용해서 conversations.info로 C12345678 채널 정보를 조회해줘.
+
+my-slack skill로 users.list를 호출해서 사용자 목록을 20개만 가져와줘.
+
+my-slack를 사용해서 chat.postMessage dry-run 결과를 먼저 보여줘.
 ```
 
 ## Test
