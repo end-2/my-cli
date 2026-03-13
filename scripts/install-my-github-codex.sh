@@ -79,10 +79,17 @@ require_file "${BUILT_BINARY_PATH}"
 mkdir -p "${INSTALL_BIN_DIR}" "${INSTALL_SKILL_DIR}"
 
 install -m 0755 "${BUILT_BINARY_PATH}" "${INSTALL_BIN_PATH}"
-install -m 0644 "${SOURCE_EXAMPLE_PATH}" "${INSTALL_CONFIG_PATH}"
+
+config_status="Installed"
+if [[ -e "${INSTALL_CONFIG_PATH}" ]]; then
+  config_status="Skipped existing"
+else
+  install -m 0644 "${SOURCE_EXAMPLE_PATH}" "${INSTALL_CONFIG_PATH}"
+fi
+
 render_skill
 
 printf 'Installed binary: %s\n' "${INSTALL_BIN_PATH}"
 printf 'Installed skill: %s\n' "${INSTALL_SKILL_PATH}"
-printf 'Installed example config: %s\n' "${INSTALL_CONFIG_PATH}"
+printf '%s example config: %s\n' "${config_status}" "${INSTALL_CONFIG_PATH}"
 printf 'Add %s to PATH if you want to run my-github directly from the shell.\n' "${INSTALL_BIN_DIR}"

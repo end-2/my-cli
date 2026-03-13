@@ -19,17 +19,21 @@ const (
 	APIVersion          = "2022-11-28"
 	DefaultUserAgent    = "my-cli/my-github"
 	DefaultTimeout      = 15 * time.Second
-	DefaultHistoryLimit = 30
-	MaxHistoryLimit     = 100
+	DefaultListLimit    = 30
+	MaxListLimit        = 100
+	DefaultHistoryLimit = DefaultListLimit
+	MaxHistoryLimit     = MaxListLimit
 )
 
 type Request struct {
-	Kind   string `json:"kind"`
-	Owner  string `json:"owner"`
-	Repo   string `json:"repo"`
-	Number int    `json:"number,omitempty"`
-	Ref    string `json:"ref,omitempty"`
-	Limit  *int   `json:"limit,omitempty"`
+	Kind    string `json:"kind"`
+	Owner   string `json:"owner"`
+	Repo    string `json:"repo"`
+	Number  int    `json:"number,omitempty"`
+	Ref     string `json:"ref,omitempty"`
+	Limit   *int   `json:"limit,omitempty"`
+	BaseURL string `json:"base_url,omitempty"`
+	Alias   string `json:"alias,omitempty"`
 }
 
 func ParseRequest(raw string) (Request, error) {
@@ -50,6 +54,8 @@ func (r *Request) normalize() error {
 	r.Owner = strings.TrimSpace(r.Owner)
 	r.Repo = strings.TrimSpace(r.Repo)
 	r.Ref = strings.TrimSpace(r.Ref)
+	r.BaseURL = strings.TrimSpace(r.BaseURL)
+	r.Alias = strings.TrimSpace(r.Alias)
 
 	if r.Owner == "" {
 		return errors.New("json input field \"owner\" is required")
@@ -67,6 +73,18 @@ func (r *Request) normalize() error {
 
 		if r.Ref != "" {
 			return fmt.Errorf("json input field \"ref\" is not allowed for kind %q", r.Kind)
+		}
+	case "issue_list", "pull_request_list":
+		if r.Number != 0 {
+			return fmt.Errorf("json input field \"number\" is not allowed for kind %q", r.Kind)
+		}
+
+		if r.Ref != "" {
+			return fmt.Errorf("json input field \"ref\" is not allowed for kind %q", r.Kind)
+		}
+
+		if r.Limit != nil && (*r.Limit < 1 || *r.Limit > MaxListLimit) {
+			return fmt.Errorf("json input field \"limit\" must be between 1 and %d for kind %q", MaxListLimit, r.Kind)
 		}
 	case "commit":
 		if r.Ref == "" {
@@ -89,7 +107,15 @@ func (r *Request) normalize() error {
 			return fmt.Errorf("json input field \"limit\" must be between 1 and %d for kind %q", MaxHistoryLimit, r.Kind)
 		}
 	default:
-		return fmt.Errorf("json input field \"kind\" must be one of %q, %q, %q, or %q", "issue", "pull_request", "commit", "commit_history")
+		return fmt.Errorf(
+			"json input field \"kind\" must be one of %q, %q, %q, %q, %q, or %q",
+			"issue",
+			"issue_list",
+			"pull_request",
+			"pull_request_list",
+			"commit",
+			"commit_history",
+		)
 	}
 
 	return nil
@@ -99,6 +125,10 @@ func normalizeKind(kind string) string {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "pr", "pull-request", "pull_request":
 		return "pull_request"
+	case "issue-list", "issue_list", "issues":
+		return "issue_list"
+	case "pr-list", "pr_list", "prs", "pull-request-list", "pull_request_list", "pulls":
+		return "pull_request_list"
 	case "commit-history", "commit_history":
 		return "commit_history"
 	default:
@@ -215,8 +245,12 @@ func (c *Client) BuildRequest(input Request) (RequestPlan, error) {
 	switch input.Kind {
 	case "issue":
 		path = fmt.Sprintf("repos/%s/%s/issues/%d", url.PathEscape(input.Owner), url.PathEscape(input.Repo), input.Number)
+	case "issue_list":
+		path = fmt.Sprintf("repos/%s/%s/issues", url.PathEscape(input.Owner), url.PathEscape(input.Repo))
 	case "pull_request":
 		path = fmt.Sprintf("repos/%s/%s/pulls/%d", url.PathEscape(input.Owner), url.PathEscape(input.Repo), input.Number)
+	case "pull_request_list":
+		path = fmt.Sprintf("repos/%s/%s/pulls", url.PathEscape(input.Owner), url.PathEscape(input.Repo))
 	case "commit":
 		path = fmt.Sprintf("repos/%s/%s/commits/%s", url.PathEscape(input.Owner), url.PathEscape(input.Repo), url.PathEscape(input.Ref))
 	case "commit_history":
@@ -230,10 +264,15 @@ func (c *Client) BuildRequest(input Request) (RequestPlan, error) {
 		return RequestPlan{}, fmt.Errorf("build github api url: %w", err)
 	}
 
-	if input.Kind == "commit_history" {
+	switch input.Kind {
+	case "issue_list", "pull_request_list":
+		query := endpoint.Query()
+		query.Set("per_page", strconv.Itoa(listLimit(input.Limit)))
+		endpoint.RawQuery = query.Encode()
+	case "commit_history":
 		query := endpoint.Query()
 		query.Set("sha", input.Ref)
-		query.Set("per_page", strconv.Itoa(historyLimit(input.Limit)))
+		query.Set("per_page", strconv.Itoa(listLimit(input.Limit)))
 		endpoint.RawQuery = query.Encode()
 	}
 
@@ -244,6 +283,39 @@ func (c *Client) BuildRequest(input Request) (RequestPlan, error) {
 }
 
 func (c *Client) Execute(plan RequestPlan, input Request) (any, error) {
+	if input.Kind == "issue_list" {
+		return c.executeIssueList(plan, input)
+	}
+
+	resp, err := c.do(plan)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	if resp.StatusCode >= http.StatusBadRequest {
+		return nil, decodeAPIError(resp, plan.Path)
+	}
+
+	switch input.Kind {
+	case "issue":
+		return decodeIssueOutput(resp.Body, input)
+	case "pull_request":
+		return decodePullRequestOutput(resp.Body, input)
+	case "pull_request_list":
+		return decodePullRequestListOutput(resp.Body, input)
+	case "commit":
+		return decodeCommitOutput(resp.Body, input)
+	case "commit_history":
+		return decodeCommitHistoryOutput(resp.Body, input)
+	default:
+		return nil, fmt.Errorf("unsupported kind %q", input.Kind)
+	}
+}
+
+func (c *Client) do(plan RequestPlan) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodGet, plan.URL.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("create github api request: %w", err)
@@ -261,25 +333,72 @@ func (c *Client) Execute(plan RequestPlan, input Request) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("call github api %s: %w", plan.Path, err)
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
 
-	if resp.StatusCode >= http.StatusBadRequest {
-		return nil, decodeAPIError(resp, plan.Path)
+	return resp, nil
+}
+
+func (c *Client) executeIssueList(plan RequestPlan, input Request) (issueListEnvelope, error) {
+	limit := listLimit(input.Limit)
+	items := make([]issueOutput, 0, limit)
+
+	for page := 1; len(items) < limit; page++ {
+		pagePlan := requestPlanWithPage(plan, page)
+
+		resp, err := c.do(pagePlan)
+		if err != nil {
+			return issueListEnvelope{}, err
+		}
+
+		pageItems, rawCount, err := func() ([]issueOutput, int, error) {
+			defer func() {
+				_ = resp.Body.Close()
+			}()
+
+			if resp.StatusCode >= http.StatusBadRequest {
+				return nil, 0, decodeAPIError(resp, pagePlan.Path)
+			}
+
+			return decodeIssueListPage(resp.Body)
+		}()
+		if err != nil {
+			return issueListEnvelope{}, err
+		}
+
+		for _, item := range pageItems {
+			if len(items) >= limit {
+				break
+			}
+
+			items = append(items, item)
+		}
+
+		if rawCount < listLimit(input.Limit) {
+			break
+		}
 	}
 
-	switch input.Kind {
-	case "issue":
-		return decodeIssueOutput(resp.Body, input)
-	case "pull_request":
-		return decodePullRequestOutput(resp.Body, input)
-	case "commit":
-		return decodeCommitOutput(resp.Body, input)
-	case "commit_history":
-		return decodeCommitHistoryOutput(resp.Body, input)
-	default:
-		return nil, fmt.Errorf("unsupported kind %q", input.Kind)
+	return issueListEnvelope{
+		Kind: "issue_list",
+		Repository: repositoryOutput{
+			Owner: input.Owner,
+			Repo:  input.Repo,
+		},
+		IssueList: issueListOutput{
+			Limit:  limit,
+			Issues: items,
+		},
+	}, nil
+}
+
+func requestPlanWithPage(plan RequestPlan, page int) RequestPlan {
+	endpoint := *plan.URL
+	query := endpoint.Query()
+	query.Set("page", strconv.Itoa(page))
+	endpoint.RawQuery = query.Encode()
+
+	return RequestPlan{
+		URL:  &endpoint,
+		Path: endpoint.RequestURI(),
 	}
 }
 
@@ -314,6 +433,12 @@ type issueEnvelope struct {
 	Kind       string           `json:"kind"`
 	Repository repositoryOutput `json:"repository"`
 	Issue      issueOutput      `json:"issue"`
+}
+
+type issueListEnvelope struct {
+	Kind       string           `json:"kind"`
+	Repository repositoryOutput `json:"repository"`
+	IssueList  issueListOutput  `json:"issue_list"`
 }
 
 type issueAPIResponse struct {
@@ -369,28 +494,25 @@ func decodeIssueOutput(body io.Reader, input Request) (issueEnvelope, error) {
 			Owner: input.Owner,
 			Repo:  input.Repo,
 		},
-		Issue: issueOutput{
-			Number:    payload.Number,
-			Title:     payload.Title,
-			State:     payload.State,
-			Author:    payload.User.Login,
-			Assignees: collectUserLogins(payload.Assignees),
-			Labels:    collectLabelNames(payload.Labels),
-			Comments:  payload.Comments,
-			CreatedAt: payload.CreatedAt,
-			UpdatedAt: payload.UpdatedAt,
-			ClosedAt:  payload.ClosedAt,
-			URL:       payload.HTMLURL,
-			APIURL:    payload.URL,
-			Body:      payload.Body,
-		},
+		Issue: normalizeIssueOutput(payload),
 	}, nil
+}
+
+type issueListOutput struct {
+	Limit  int           `json:"limit"`
+	Issues []issueOutput `json:"issues"`
 }
 
 type pullRequestEnvelope struct {
 	Kind        string            `json:"kind"`
 	Repository  repositoryOutput  `json:"repository"`
 	PullRequest pullRequestOutput `json:"pull_request"`
+}
+
+type pullRequestListEnvelope struct {
+	Kind            string                `json:"kind"`
+	Repository      repositoryOutput      `json:"repository"`
+	PullRequestList pullRequestListOutput `json:"pull_request_list"`
 }
 
 type pullRequestAPIResponse struct {
@@ -446,25 +568,13 @@ func decodePullRequestOutput(body io.Reader, input Request) (pullRequestEnvelope
 			Owner: input.Owner,
 			Repo:  input.Repo,
 		},
-		PullRequest: pullRequestOutput{
-			Number:     payload.Number,
-			Title:      payload.Title,
-			State:      payload.State,
-			Draft:      payload.Draft,
-			Merged:     payload.Merged,
-			Author:     payload.User.Login,
-			BaseBranch: payload.Base.Ref,
-			BaseSHA:    payload.Base.SHA,
-			HeadBranch: payload.Head.Ref,
-			HeadSHA:    payload.Head.SHA,
-			CreatedAt:  payload.CreatedAt,
-			UpdatedAt:  payload.UpdatedAt,
-			MergedAt:   payload.MergedAt,
-			URL:        payload.HTMLURL,
-			APIURL:     payload.URL,
-			Body:       payload.Body,
-		},
+		PullRequest: normalizePullRequestOutput(payload),
 	}, nil
+}
+
+type pullRequestListOutput struct {
+	Limit        int                 `json:"limit"`
+	PullRequests []pullRequestOutput `json:"pull_requests"`
 }
 
 type commitEnvelope struct {
@@ -607,8 +717,50 @@ func decodeCommitHistoryOutput(body io.Reader, input Request) (commitHistoryEnve
 		},
 		CommitHistory: commitHistoryOutput{
 			Ref:     input.Ref,
-			Limit:   historyLimit(input.Limit),
+			Limit:   listLimit(input.Limit),
 			Commits: commits,
+		},
+	}, nil
+}
+
+func decodeIssueListPage(body io.Reader) ([]issueOutput, int, error) {
+	var payload []issueAPIResponse
+	if err := json.NewDecoder(body).Decode(&payload); err != nil {
+		return nil, 0, fmt.Errorf("decode github issue list response: %w", err)
+	}
+
+	items := make([]issueOutput, 0, len(payload))
+	for _, item := range payload {
+		if item.PullRequest != nil {
+			continue
+		}
+
+		items = append(items, normalizeIssueOutput(item))
+	}
+
+	return items, len(payload), nil
+}
+
+func decodePullRequestListOutput(body io.Reader, input Request) (pullRequestListEnvelope, error) {
+	var payload []pullRequestAPIResponse
+	if err := json.NewDecoder(body).Decode(&payload); err != nil {
+		return pullRequestListEnvelope{}, fmt.Errorf("decode github pull request list response: %w", err)
+	}
+
+	items := make([]pullRequestOutput, 0, len(payload))
+	for _, item := range payload {
+		items = append(items, normalizePullRequestOutput(item))
+	}
+
+	return pullRequestListEnvelope{
+		Kind: "pull_request_list",
+		Repository: repositoryOutput{
+			Owner: input.Owner,
+			Repo:  input.Repo,
+		},
+		PullRequestList: pullRequestListOutput{
+			Limit:        listLimit(input.Limit),
+			PullRequests: items,
 		},
 	}, nil
 }
@@ -649,9 +801,48 @@ func normalizeCommitOutput(payload commitAPIResponse) commitOutput {
 	return output
 }
 
-func historyLimit(limit *int) int {
+func normalizeIssueOutput(payload issueAPIResponse) issueOutput {
+	return issueOutput{
+		Number:    payload.Number,
+		Title:     payload.Title,
+		State:     payload.State,
+		Author:    payload.User.Login,
+		Assignees: collectUserLogins(payload.Assignees),
+		Labels:    collectLabelNames(payload.Labels),
+		Comments:  payload.Comments,
+		CreatedAt: payload.CreatedAt,
+		UpdatedAt: payload.UpdatedAt,
+		ClosedAt:  payload.ClosedAt,
+		URL:       payload.HTMLURL,
+		APIURL:    payload.URL,
+		Body:      payload.Body,
+	}
+}
+
+func normalizePullRequestOutput(payload pullRequestAPIResponse) pullRequestOutput {
+	return pullRequestOutput{
+		Number:     payload.Number,
+		Title:      payload.Title,
+		State:      payload.State,
+		Draft:      payload.Draft,
+		Merged:     payload.Merged,
+		Author:     payload.User.Login,
+		BaseBranch: payload.Base.Ref,
+		BaseSHA:    payload.Base.SHA,
+		HeadBranch: payload.Head.Ref,
+		HeadSHA:    payload.Head.SHA,
+		CreatedAt:  payload.CreatedAt,
+		UpdatedAt:  payload.UpdatedAt,
+		MergedAt:   payload.MergedAt,
+		URL:        payload.HTMLURL,
+		APIURL:     payload.URL,
+		Body:       payload.Body,
+	}
+}
+
+func listLimit(limit *int) int {
 	if limit == nil {
-		return DefaultHistoryLimit
+		return DefaultListLimit
 	}
 
 	return *limit

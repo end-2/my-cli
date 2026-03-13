@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/end-2/my-cli/src/cmd/my-github/internal/github"
 )
 
 func TestLoadConfigLoadsCurrentDirectoryFile(t *testing.T) {
@@ -140,7 +142,7 @@ func TestFileConfigToClientConfigAppliesDefaultBaseURLOverride(t *testing.T) {
 				},
 			},
 		},
-	}.toClientConfig()
+	}.toClientConfig(github.Request{})
 	if err != nil {
 		t.Fatalf("toClientConfig returned error: %v", err)
 	}
@@ -162,14 +164,147 @@ func TestFileConfigToClientConfigAppliesDefaultBaseURLOverride(t *testing.T) {
 	}
 }
 
+func TestFileConfigToClientConfigUsesRequestBaseURLOverride(t *testing.T) {
+	config, err := fileConfig{
+		GitHub: gitHubConfig{
+			BaseURL:   "https://api.github.com/",
+			Token:     "default-token",
+			Timeout:   "3s",
+			UserAgent: "default-agent",
+			ByBaseURL: []gitHubBaseURLConfigEntry{
+				{
+					Alias:     "github.com",
+					BaseURL:   "https://api.github.com/",
+					Token:     "public-token",
+					UserAgent: "public-agent",
+				},
+				{
+					Alias:     "example-ghe",
+					BaseURL:   "https://ghe.example.com/api/v3/",
+					Token:     "enterprise-token",
+					Timeout:   "30s",
+					UserAgent: "enterprise-agent",
+				},
+			},
+		},
+	}.toClientConfig(github.Request{BaseURL: "https://ghe.example.com/api/v3"})
+	if err != nil {
+		t.Fatalf("toClientConfig returned error: %v", err)
+	}
+
+	if config.BaseURL != "https://ghe.example.com/api/v3" {
+		t.Fatalf("BaseURL = %q, want request base URL", config.BaseURL)
+	}
+
+	if config.Token != "enterprise-token" {
+		t.Fatalf("Token = %q, want %q", config.Token, "enterprise-token")
+	}
+
+	if config.Timeout != 30*time.Second {
+		t.Fatalf("Timeout = %s, want %s", config.Timeout, 30*time.Second)
+	}
+
+	if config.UserAgent != "enterprise-agent" {
+		t.Fatalf("UserAgent = %q, want %q", config.UserAgent, "enterprise-agent")
+	}
+}
+
+func TestFileConfigToClientConfigUsesRequestAliasOverride(t *testing.T) {
+	config, err := fileConfig{
+		GitHub: gitHubConfig{
+			BaseURL:   "https://api.github.com/",
+			Token:     "default-token",
+			Timeout:   "3s",
+			UserAgent: "default-agent",
+			ByBaseURL: []gitHubBaseURLConfigEntry{
+				{
+					Alias:     "github.com",
+					BaseURL:   "https://api.github.com/",
+					Token:     "public-token",
+					UserAgent: "public-agent",
+				},
+				{
+					Alias:     "example-ghe",
+					BaseURL:   "https://ghe.example.com/api/v3/",
+					Token:     "enterprise-token",
+					Timeout:   "30s",
+					UserAgent: "enterprise-agent",
+				},
+			},
+		},
+	}.toClientConfig(github.Request{Alias: "example-ghe"})
+	if err != nil {
+		t.Fatalf("toClientConfig returned error: %v", err)
+	}
+
+	if config.BaseURL != "https://ghe.example.com/api/v3/" {
+		t.Fatalf("BaseURL = %q, want alias base URL", config.BaseURL)
+	}
+
+	if config.Token != "enterprise-token" {
+		t.Fatalf("Token = %q, want %q", config.Token, "enterprise-token")
+	}
+
+	if config.Timeout != 30*time.Second {
+		t.Fatalf("Timeout = %s, want %s", config.Timeout, 30*time.Second)
+	}
+
+	if config.UserAgent != "enterprise-agent" {
+		t.Fatalf("UserAgent = %q, want %q", config.UserAgent, "enterprise-agent")
+	}
+}
+
 func TestFileConfigToClientConfigRejectsInvalidTimeout(t *testing.T) {
 	_, err := fileConfig{
 		GitHub: gitHubConfig{
 			Timeout: "not-a-duration",
 		},
-	}.toClientConfig()
+	}.toClientConfig(github.Request{})
 	if err == nil {
 		t.Fatal("toClientConfig returned nil error, want timeout parse error")
+	}
+}
+
+func TestFileConfigToClientConfigRejectsUnknownRequestAlias(t *testing.T) {
+	_, err := fileConfig{
+		GitHub: gitHubConfig{
+			ByBaseURL: []gitHubBaseURLConfigEntry{
+				{
+					Alias:   "github.com",
+					BaseURL: "https://api.github.com/",
+				},
+			},
+		},
+	}.toClientConfig(github.Request{Alias: "example-ghe"})
+	if err == nil {
+		t.Fatal("toClientConfig returned nil error, want unknown alias error")
+	}
+
+	if !strings.Contains(err.Error(), `"alias" "example-ghe" does not match any github.by_base_url entry`) {
+		t.Fatalf("error = %q, want unknown alias error", err)
+	}
+}
+
+func TestFileConfigToClientConfigRejectsRequestAliasBaseURLMismatch(t *testing.T) {
+	_, err := fileConfig{
+		GitHub: gitHubConfig{
+			ByBaseURL: []gitHubBaseURLConfigEntry{
+				{
+					Alias:   "example-ghe",
+					BaseURL: "https://ghe.example.com/api/v3/",
+				},
+			},
+		},
+	}.toClientConfig(github.Request{
+		Alias:   "example-ghe",
+		BaseURL: "https://api.github.com/",
+	})
+	if err == nil {
+		t.Fatal("toClientConfig returned nil error, want alias/base_url mismatch error")
+	}
+
+	if !strings.Contains(err.Error(), `"alias" and "base_url" must refer to the same github.by_base_url entry`) {
+		t.Fatalf("error = %q, want alias/base_url mismatch error", err)
 	}
 }
 
@@ -184,7 +319,7 @@ func TestFileConfigToClientConfigRejectsInvalidBaseURLSpecificTimeout(t *testing
 				},
 			},
 		},
-	}.toClientConfig()
+	}.toClientConfig(github.Request{})
 	if err == nil {
 		t.Fatal("toClientConfig returned nil error, want timeout parse error")
 	}
@@ -202,7 +337,7 @@ func TestFileConfigToClientConfigUsesAliasInMatchedEntryError(t *testing.T) {
 				},
 			},
 		},
-	}.toClientConfig()
+	}.toClientConfig(github.Request{})
 	if err == nil {
 		t.Fatal("toClientConfig returned nil error, want timeout parse error")
 	}
@@ -221,7 +356,7 @@ func TestFileConfigToClientConfigRejectsDuplicateNormalizedBaseURLs(t *testing.T
 				{Alias: "public-mirror", BaseURL: "https://api.github.com/"},
 			},
 		},
-	}.toClientConfig()
+	}.toClientConfig(github.Request{})
 	if err == nil {
 		t.Fatal("toClientConfig returned nil error, want duplicate base URL error")
 	}

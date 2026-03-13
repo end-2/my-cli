@@ -69,7 +69,7 @@ func TestRootCommandPrintsHelp(t *testing.T) {
 
 	output := stdout.String()
 	for _, expected := range []string{
-		"Query GitHub issues, pull requests, commits, and commit history",
+		"Query GitHub issues, pull requests, issue lists, pull request lists, commits, and commit history",
 		"--dry-run",
 		"--version",
 		"my-github.yaml",
@@ -111,7 +111,7 @@ func TestRootCommandPrintsDryRunPlanUsingConfig(t *testing.T) {
 		&stderr,
 		[]string{"--dry-run", `{"kind":"issue","owner":"cli","repo":"cli","number":123}`},
 		ghapp.Dependencies{
-			LoadConfig: func() (github.ClientConfig, error) {
+			LoadConfig: func(request github.Request) (github.ClientConfig, error) {
 				return github.ClientConfig{
 					BaseURL: "https://example.github.local/api/v3",
 					Token:   "configured-token",
@@ -148,6 +148,67 @@ func TestRootCommandPrintsDryRunPlanUsingConfig(t *testing.T) {
 
 	if got := stderr.String(); got != "" {
 		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
+func TestRootCommandPassesConfigSelectorsToLoader(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	var loadedRequest github.Request
+
+	err := executeWithDependencies(
+		strings.NewReader(""),
+		&stdout,
+		&stderr,
+		[]string{"--dry-run", `{"kind":"issue","owner":"cli","repo":"cli","number":123,"base_url":"https://ghe.example.com/api/v3","alias":"example-ghe"}`},
+		ghapp.Dependencies{
+			LoadConfig: func(request github.Request) (github.ClientConfig, error) {
+				loadedRequest = request
+
+				return github.ClientConfig{
+					BaseURL: "https://ghe.example.com/api/v3",
+					Token:   "configured-token",
+					Timeout: time.Second,
+				}, nil
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("executeWithDependencies returned error: %v", err)
+	}
+
+	if loadedRequest.BaseURL != "https://ghe.example.com/api/v3" {
+		t.Fatalf("loadedRequest.BaseURL = %q, want request base URL", loadedRequest.BaseURL)
+	}
+
+	if loadedRequest.Alias != "example-ghe" {
+		t.Fatalf("loadedRequest.Alias = %q, want request alias", loadedRequest.Alias)
+	}
+
+	var output struct {
+		HTTP struct {
+			URL string `json:"url"`
+		} `json:"http"`
+		Request struct {
+			BaseURL string `json:"base_url"`
+			Alias   string `json:"alias"`
+		} `json:"request"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+		t.Fatalf("stdout is not valid json: %v", err)
+	}
+
+	if output.HTTP.URL != "https://ghe.example.com/api/v3/repos/cli/cli/issues/123" {
+		t.Fatalf("HTTP.URL = %q, want request-selected URL", output.HTTP.URL)
+	}
+
+	if output.Request.BaseURL != "https://ghe.example.com/api/v3" {
+		t.Fatalf("Request.BaseURL = %q, want %q", output.Request.BaseURL, "https://ghe.example.com/api/v3")
+	}
+
+	if output.Request.Alias != "example-ghe" {
+		t.Fatalf("Request.Alias = %q, want %q", output.Request.Alias, "example-ghe")
 	}
 }
 
@@ -284,6 +345,130 @@ func TestRootCommandFetchesIssue(t *testing.T) {
 	}
 }
 
+func TestRootCommandFetchesIssueList(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/cli/cli/issues" {
+			t.Fatalf("path = %q, want %q", r.URL.Path, "/repos/cli/cli/issues")
+		}
+
+		if got := r.URL.Query().Get("per_page"); got != "2" {
+			t.Fatalf("per_page = %q, want %q", got, "2")
+		}
+
+		switch r.URL.Query().Get("page") {
+		case "1":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[
+				{
+					"url":"https://api.github.com/repos/cli/cli/issues/999",
+					"html_url":"https://github.com/cli/cli/pull/999",
+					"number":999,
+					"title":"Pull request item",
+					"state":"open",
+					"body":"PR body",
+					"comments":1,
+					"user":{"login":"octocat"},
+					"assignees":[],
+					"labels":[],
+					"created_at":"2026-03-10T12:00:00Z",
+					"updated_at":"2026-03-11T12:00:00Z",
+					"closed_at":null,
+					"pull_request":{"url":"https://api.github.com/repos/cli/cli/pulls/999"}
+				},
+				{
+					"url":"https://api.github.com/repos/cli/cli/issues/123",
+					"html_url":"https://github.com/cli/cli/issues/123",
+					"number":123,
+					"title":"First issue",
+					"state":"open",
+					"body":"Issue body",
+					"comments":4,
+					"user":{"login":"octocat"},
+					"assignees":[{"login":"hubot"}],
+					"labels":[{"name":"bug"}],
+					"created_at":"2026-03-10T12:00:00Z",
+					"updated_at":"2026-03-11T12:00:00Z",
+					"closed_at":null
+				}
+			]`))
+		case "2":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[
+				{
+					"url":"https://api.github.com/repos/cli/cli/issues/122",
+					"html_url":"https://github.com/cli/cli/issues/122",
+					"number":122,
+					"title":"Second issue",
+					"state":"open",
+					"body":"Another issue body",
+					"comments":2,
+					"user":{"login":"hubot"},
+					"assignees":[],
+					"labels":[{"name":"docs"}],
+					"created_at":"2026-03-09T12:00:00Z",
+					"updated_at":"2026-03-10T12:00:00Z",
+					"closed_at":null
+				}
+			]`))
+		default:
+			t.Fatalf("page = %q, want %q or %q", r.URL.Query().Get("page"), "1", "2")
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := executeWithDependencies(
+		strings.NewReader(""),
+		&stdout,
+		&stderr,
+		[]string{`{"kind":"issue_list","owner":"cli","repo":"cli","limit":2}`},
+		testDependencies(server.URL, server.Client(), ""),
+	)
+	if err != nil {
+		t.Fatalf("executeWithDependencies returned error: %v", err)
+	}
+
+	var output struct {
+		Kind      string `json:"kind"`
+		IssueList struct {
+			Limit  int `json:"limit"`
+			Issues []struct {
+				Number int    `json:"number"`
+				Title  string `json:"title"`
+			} `json:"issues"`
+		} `json:"issue_list"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+		t.Fatalf("stdout is not valid json: %v", err)
+	}
+
+	if output.Kind != "issue_list" {
+		t.Fatalf("Kind = %q, want %q", output.Kind, "issue_list")
+	}
+
+	if output.IssueList.Limit != 2 {
+		t.Fatalf("IssueList.Limit = %d, want %d", output.IssueList.Limit, 2)
+	}
+
+	if len(output.IssueList.Issues) != 2 {
+		t.Fatalf("len(IssueList.Issues) = %d, want %d", len(output.IssueList.Issues), 2)
+	}
+
+	if output.IssueList.Issues[0].Number != 123 {
+		t.Fatalf("IssueList.Issues[0].Number = %d, want %d", output.IssueList.Issues[0].Number, 123)
+	}
+
+	if output.IssueList.Issues[1].Title != "Second issue" {
+		t.Fatalf("IssueList.Issues[1].Title = %q, want %q", output.IssueList.Issues[1].Title, "Second issue")
+	}
+
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
 func TestRootCommandFetchesPullRequestWithAlias(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/repos/cli/cli/pulls/456" {
@@ -340,6 +525,106 @@ func TestRootCommandFetchesPullRequestWithAlias(t *testing.T) {
 
 	if output.PullRequest.HeadBranch != "feature" {
 		t.Fatalf("PullRequest.HeadBranch = %q, want %q", output.PullRequest.HeadBranch, "feature")
+	}
+
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
+func TestRootCommandFetchesPullRequestListWithAlias(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/cli/cli/pulls" {
+			t.Fatalf("path = %q, want %q", r.URL.Path, "/repos/cli/cli/pulls")
+		}
+
+		if got := r.URL.Query().Get("per_page"); got != "2" {
+			t.Fatalf("per_page = %q, want %q", got, "2")
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[
+			{
+				"url":"https://api.github.com/repos/cli/cli/pulls/456",
+				"html_url":"https://github.com/cli/cli/pull/456",
+				"number":456,
+				"title":"PR title",
+				"state":"open",
+				"body":"PR body",
+				"draft":false,
+				"user":{"login":"monalisa"},
+				"base":{"ref":"main","sha":"base-sha"},
+				"head":{"ref":"feature","sha":"head-sha"},
+				"created_at":"2026-03-10T12:00:00Z",
+				"updated_at":"2026-03-11T12:00:00Z",
+				"merged_at":null
+			},
+			{
+				"url":"https://api.github.com/repos/cli/cli/pulls/455",
+				"html_url":"https://github.com/cli/cli/pull/455",
+				"number":455,
+				"title":"Older PR",
+				"state":"open",
+				"body":"Older PR body",
+				"draft":true,
+				"user":{"login":"hubot"},
+				"base":{"ref":"main","sha":"older-base"},
+				"head":{"ref":"feature-2","sha":"older-head"},
+				"created_at":"2026-03-09T12:00:00Z",
+				"updated_at":"2026-03-10T12:00:00Z",
+				"merged_at":null
+			}
+		]`))
+	}))
+	t.Cleanup(server.Close)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := executeWithDependencies(
+		strings.NewReader(""),
+		&stdout,
+		&stderr,
+		[]string{`{"kind":"pr-list","owner":"cli","repo":"cli","limit":2}`},
+		testDependencies(server.URL, server.Client(), ""),
+	)
+	if err != nil {
+		t.Fatalf("executeWithDependencies returned error: %v", err)
+	}
+
+	var output struct {
+		Kind            string `json:"kind"`
+		PullRequestList struct {
+			Limit        int `json:"limit"`
+			PullRequests []struct {
+				Number     int    `json:"number"`
+				HeadBranch string `json:"head_branch"`
+				Draft      bool   `json:"draft"`
+			} `json:"pull_requests"`
+		} `json:"pull_request_list"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+		t.Fatalf("stdout is not valid json: %v", err)
+	}
+
+	if output.Kind != "pull_request_list" {
+		t.Fatalf("Kind = %q, want %q", output.Kind, "pull_request_list")
+	}
+
+	if output.PullRequestList.Limit != 2 {
+		t.Fatalf("PullRequestList.Limit = %d, want %d", output.PullRequestList.Limit, 2)
+	}
+
+	if len(output.PullRequestList.PullRequests) != 2 {
+		t.Fatalf("len(PullRequestList.PullRequests) = %d, want %d", len(output.PullRequestList.PullRequests), 2)
+	}
+
+	if output.PullRequestList.PullRequests[0].HeadBranch != "feature" {
+		t.Fatalf("PullRequestList.PullRequests[0].HeadBranch = %q, want %q", output.PullRequestList.PullRequests[0].HeadBranch, "feature")
+	}
+
+	if !output.PullRequestList.PullRequests[1].Draft {
+		t.Fatal("PullRequestList.PullRequests[1].Draft = false, want true")
 	}
 
 	if got := stderr.String(); got != "" {
@@ -632,7 +917,7 @@ func executeWithDependencies(stdin *strings.Reader, stdout, stderr *bytes.Buffer
 
 func testDependencies(baseURL string, httpClient *http.Client, token string) ghapp.Dependencies {
 	return ghapp.Dependencies{
-		LoadConfig: func() (github.ClientConfig, error) {
+		LoadConfig: func(request github.Request) (github.ClientConfig, error) {
 			return github.ClientConfig{
 				BaseURL: baseURL,
 				Token:   token,

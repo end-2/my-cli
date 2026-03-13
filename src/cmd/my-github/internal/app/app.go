@@ -12,7 +12,7 @@ import (
 )
 
 type Dependencies struct {
-	LoadConfig func() (github.ClientConfig, error)
+	LoadConfig func(github.Request) (github.ClientConfig, error)
 	HTTPClient *http.Client
 }
 
@@ -28,7 +28,7 @@ func Execute(stdin io.Reader, stdout, stderr io.Writer, args []string, version s
 
 func ExecuteWithDependencies(stdin io.Reader, stdout, stderr io.Writer, args []string, version string, deps Dependencies) error {
 	if deps.LoadConfig == nil {
-		deps.LoadConfig = LoadConfig
+		deps.LoadConfig = LoadConfigForRequest
 	}
 
 	cmd := newExecutor(stdin, version, deps).newRootCmd(stdout, stderr)
@@ -51,16 +51,20 @@ func (e *executor) newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "my-github '<json>'",
-		Short: "Query GitHub issues, pull requests, commits, and commit history",
+		Short: "Query GitHub issues, pull requests, lists, commits, and commit history",
 		Long: strings.Join([]string{
-			"Query GitHub issues, pull requests, commits, and commit history.",
+			"Query GitHub issues, pull requests, issue lists, pull request lists, commits, and commit history.",
 			"my-github queries the GitHub REST API with one JSON request.",
 			"Provide the JSON as a single argument or pipe it through stdin.",
 			"Configure base URL, per-base-url overrides, timeout, user agent, and token with my-github.yaml via src/pkg/config.",
+			"Request JSON may also select a configured instance with base_url or alias.",
 		}, "\n"),
 		Example: strings.Join([]string{
 			`my-github '{"kind":"issue","owner":"cli","repo":"cli","number":123}'`,
+			`my-github '{"kind":"issue_list","owner":"cli","repo":"cli","limit":10}'`,
 			`my-github '{"kind":"pull_request","owner":"cli","repo":"cli","number":456}'`,
+			`my-github '{"kind":"pull_request_list","owner":"cli","repo":"cli","limit":10}'`,
+			`my-github '{"kind":"issue","owner":"cli","repo":"cli","number":123,"alias":"example-ghe"}'`,
 			`echo '{"kind":"commit","owner":"cli","repo":"cli","ref":"trunk"}' | my-github`,
 			`my-github '{"kind":"commit_history","owner":"cli","repo":"cli","ref":"trunk","limit":10}'`,
 			`my-github --dry-run '{"kind":"issue","owner":"cli","repo":"cli","number":123}'`,
@@ -86,7 +90,7 @@ func (e *executor) newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 				return err
 			}
 
-			client, err := e.newClient()
+			client, err := e.newClient(request)
 			if err != nil {
 				return err
 			}
@@ -125,8 +129,8 @@ func (e *executor) newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 	return cmd
 }
 
-func (e *executor) newClient() (*github.Client, error) {
-	config, err := e.deps.LoadConfig()
+func (e *executor) newClient(request github.Request) (*github.Client, error) {
+	config, err := e.deps.LoadConfig(request)
 	if err != nil {
 		return nil, err
 	}

@@ -1,6 +1,6 @@
 # my-github
 
-`my-github`는 GitHub REST API에서 issue, pull request, commit, 특정 ref의 commit history를 조회하는 단일 목적 CLI입니다.  
+`my-github`는 GitHub REST API에서 issue, issue list, pull request, pull request list, commit, 특정 ref의 commit history를 조회하는 단일 목적 CLI입니다.  
 입력은 JSON 객체 하나만 받으며, 결과도 JSON으로 출력합니다.
 
 이 커맨드는 `my-cli` 프로젝트의 일부이며, 빌드/테스트/린트는 모두 Docker 컨테이너에서 실행합니다.
@@ -116,9 +116,9 @@ make clean
 - `github.by_base_url`: 비어 있음
 
 `github` 최상위 값은 공통 기본값입니다.  
-`github.by_base_url[].alias`는 사람 읽기용 식별자입니다. 어떤 GitHub 인스턴스용 override인지 바로 구분할 때 씁니다.  
-선택된 `github.base_url`과 일치하는 `github.by_base_url[].base_url` 항목이 있으면 해당 항목의 `token`, `timeout`, `user_agent`가 마지막에 덮어씌워집니다.  
-`base_url` 비교는 뒤쪽 `/` 유무를 무시하며, 실제 선택은 `alias`가 아니라 `base_url`로 이뤄집니다.
+기본 선택은 `github.base_url`로 이뤄지고, 요청 JSON에 `base_url` 또는 `alias`를 넣으면 그 값이 우선합니다.  
+선택된 GitHub 인스턴스와 일치하는 `github.by_base_url[]` 항목이 있으면 해당 항목의 `base_url`, `token`, `timeout`, `user_agent`가 마지막에 적용됩니다.  
+`github.by_base_url[].alias`는 JSON 요청의 `alias` 필드로 직접 선택할 수 있고, `base_url` 비교는 뒤쪽 `/` 유무를 무시합니다.
 
 예시입니다.
 
@@ -151,11 +151,27 @@ JSON 입력은 둘 중 하나로 전달합니다.
 ```
 
 ```bash
+./bin/my-github '{"kind":"issue_list","owner":"cli","repo":"cli","limit":10}'
+```
+
+```bash
 echo '{"kind":"commit","owner":"cli","repo":"cli","ref":"trunk"}' | ./bin/my-github
 ```
 
 ```bash
 ./bin/my-github '{"kind":"commit_history","owner":"cli","repo":"cli","ref":"release/1.0","limit":10}'
+```
+
+```bash
+./bin/my-github '{"kind":"pull_request_list","owner":"cli","repo":"cli","limit":10}'
+```
+
+```bash
+./bin/my-github '{"kind":"issue","owner":"cli","repo":"cli","number":123,"alias":"example-ghe"}'
+```
+
+```bash
+./bin/my-github '{"kind":"pull_request","owner":"cli","repo":"cli","number":456,"base_url":"https://ghe.example.com/api/v3"}'
 ```
 
 지원 플래그는 아래와 같습니다.
@@ -170,8 +186,10 @@ echo '{"kind":"commit","owner":"cli","repo":"cli","ref":"trunk"}' | ./bin/my-git
 - 인자는 최대 1개만 받을 수 있습니다.
 - 알 수 없는 필드는 에러입니다.
 - `kind`, `owner`, `repo`는 항상 필요합니다.
+- `base_url`과 `alias`는 선택값이며, 특정 `github.by_base_url` 설정을 고를 때 사용합니다.
 - 인증이 필요하면 `my-github.yaml`의 `github.token` 또는 선택된 `github.by_base_url[].token`에 값을 넣습니다.
 - 환경 변수 기반 secret 주입이 필요하면 `github.token` 또는 `github.by_base_url[].token`에 `{{ .GITHUB_TOKEN }}` 같은 템플릿을 사용합니다.
+- `base_url`과 `alias`를 함께 전달하면 같은 `github.by_base_url` 항목을 가리켜야 합니다.
 
 ## 공통 필드
 
@@ -182,24 +200,35 @@ echo '{"kind":"commit","owner":"cli","repo":"cli","ref":"trunk"}' | ./bin/my-git
 | `repo` | string | 예 | GitHub repository 이름 |
 | `number` | integer | 조건부 | `issue`, `pull_request` 조회 시 필요 |
 | `ref` | string | 조건부 | `commit`, `commit_history` 조회 시 필요. `commit`에서는 SHA/branch/tag, `commit_history`에서는 보통 branch 이름을 사용 |
-| `limit` | integer | 조건부 | `commit_history` 조회 시 선택값. 1부터 100까지 가능하며, 생략 시 30 |
+| `limit` | integer | 조건부 | `issue_list`, `pull_request_list`, `commit_history` 조회 시 선택값. 1부터 100까지 가능하며, 생략 시 30 |
+| `base_url` | string | 아니오 | 이번 요청에서 사용할 GitHub API base URL. 일치하는 `github.by_base_url` 항목이 있으면 override도 함께 적용 |
+| `alias` | string | 아니오 | 이번 요청에서 사용할 `github.by_base_url[].alias` 값 |
 
 ## kind 값
 
 | 값 | 설명 |
 | --- | --- |
 | `issue` | Issue 조회 |
+| `issue_list` | Repository issue 목록 조회 |
 | `pull_request` | Pull Request 조회 |
+| `pull_request_list` | Repository pull request 목록 조회 |
 | `commit` | Commit 조회 |
 | `commit_history` | 특정 ref 기준 commit history 조회 |
 
 아래 별칭도 허용합니다.
 
+- `issue-list`
+- `issues`
 - `pr`
 - `pull-request`
+- `pr-list`
+- `pr_list`
+- `prs`
+- `pull-request-list`
+- `pulls`
 - `commit-history`
 
-별칭을 넣어도 출력의 `kind` 값은 각각 `pull_request`, `commit_history`로 정규화됩니다.
+별칭을 넣어도 출력의 `kind` 값은 각각 `issue_list`, `pull_request`, `pull_request_list`, `commit_history`로 정규화됩니다.
 
 ## 종류별 스펙
 
@@ -251,7 +280,76 @@ echo '{"kind":"commit","owner":"cli","repo":"cli","ref":"trunk"}' | ./bin/my-git
 
 `closed_at`은 닫히지 않은 이슈면 생략되거나 `null`일 수 있습니다.
 
-### 2. Pull Request
+### 2. Issue List
+
+입력 예시입니다.
+
+```json
+{
+  "kind": "issue_list",
+  "owner": "cli",
+  "repo": "cli",
+  "limit": 2
+}
+```
+
+`issue-list`와 `issues`도 같은 의미입니다.
+
+규칙입니다.
+
+- `number`는 허용되지 않습니다.
+- `ref`는 허용되지 않습니다.
+- `limit`은 1부터 100까지 가능하며, 생략하면 30을 사용합니다.
+- GitHub `/issues` 응답에 pull request가 섞여 있으면 내부에서 제외합니다.
+
+출력 예시입니다.
+
+```json
+{
+  "kind": "issue_list",
+  "repository": {
+    "owner": "cli",
+    "repo": "cli"
+  },
+  "issue_list": {
+    "limit": 2,
+    "issues": [
+      {
+        "number": 123,
+        "title": "Issue title",
+        "state": "open",
+        "author": "octocat",
+        "assignees": ["hubot"],
+        "labels": ["bug"],
+        "comments": 4,
+        "created_at": "2026-03-10T12:00:00Z",
+        "updated_at": "2026-03-11T12:00:00Z",
+        "closed_at": null,
+        "url": "https://github.com/cli/cli/issues/123",
+        "api_url": "https://api.github.com/repos/cli/cli/issues/123",
+        "body": "Issue body"
+      },
+      {
+        "number": 122,
+        "title": "Second issue",
+        "state": "open",
+        "author": "hubot",
+        "assignees": [],
+        "labels": ["docs"],
+        "comments": 2,
+        "created_at": "2026-03-09T12:00:00Z",
+        "updated_at": "2026-03-10T12:00:00Z",
+        "closed_at": null,
+        "url": "https://github.com/cli/cli/issues/122",
+        "api_url": "https://api.github.com/repos/cli/cli/issues/122",
+        "body": "Another issue body"
+      }
+    ]
+  }
+}
+```
+
+### 3. Pull Request
 
 입력 예시입니다.
 
@@ -303,7 +401,63 @@ echo '{"kind":"commit","owner":"cli","repo":"cli","ref":"trunk"}' | ./bin/my-git
 
 `merged_at`은 merge되지 않은 PR이면 생략되거나 `null`일 수 있습니다.
 
-### 3. Commit
+### 4. Pull Request List
+
+입력 예시입니다.
+
+```json
+{
+  "kind": "pull_request_list",
+  "owner": "cli",
+  "repo": "cli",
+  "limit": 2
+}
+```
+
+`pr-list`, `pr_list`, `prs`, `pull-request-list`, `pulls`도 같은 의미입니다.
+
+규칙입니다.
+
+- `number`는 허용되지 않습니다.
+- `ref`는 허용되지 않습니다.
+- `limit`은 1부터 100까지 가능하며, 생략하면 30을 사용합니다.
+
+출력 예시입니다.
+
+```json
+{
+  "kind": "pull_request_list",
+  "repository": {
+    "owner": "cli",
+    "repo": "cli"
+  },
+  "pull_request_list": {
+    "limit": 2,
+    "pull_requests": [
+      {
+        "number": 456,
+        "title": "PR title",
+        "state": "open",
+        "draft": false,
+        "merged": false,
+        "author": "monalisa",
+        "base_branch": "main",
+        "base_sha": "base-sha",
+        "head_branch": "feature",
+        "head_sha": "head-sha",
+        "created_at": "2026-03-10T12:00:00Z",
+        "updated_at": "2026-03-11T12:00:00Z",
+        "merged_at": null,
+        "url": "https://github.com/cli/cli/pull/456",
+        "api_url": "https://api.github.com/repos/cli/cli/pulls/456",
+        "body": "PR body"
+      }
+    ]
+  }
+}
+```
+
+### 5. Commit
 
 입력 예시입니다.
 
@@ -378,7 +532,7 @@ echo '{"kind":"commit","owner":"cli","repo":"cli","ref":"trunk"}' | ./bin/my-git
 GitHub commit author와 Git author가 다를 수 있으므로 `author.login`은 없을 수도 있습니다.
 `files[].patch`는 binary 파일이거나 diff가 너무 크면 비어 있거나 생략될 수 있습니다.
 
-### 4. Commit History
+### 6. Commit History
 
 입력 예시입니다.
 
@@ -458,7 +612,7 @@ GitHub commit author와 Git author가 다를 수 있으므로 `author.login`은 
 ## dry-run 출력
 
 `--dry-run`은 GitHub API를 호출하지 않고, 어떤 요청을 보낼지만 JSON으로 출력합니다.  
-설정 파일의 `github.base_url`, `github.token`, `github.by_base_url`를 합쳐 계산한 최종 값이 dry-run 결과에도 반영됩니다.
+설정 파일의 `github.base_url`, `github.token`, `github.by_base_url`와 요청 JSON의 `base_url`/`alias`를 합쳐 계산한 최종 값이 dry-run 결과에도 반영됩니다.
 
 ```json
 {
@@ -495,9 +649,14 @@ GitHub commit author와 Git author가 다를 수 있으므로 `author.login`은 
 - `owner` 또는 `repo` 누락
 - `issue` 또는 `pull_request`에서 `number` 누락 또는 0 이하
 - `issue` 또는 `pull_request`에서 `ref` 전달
+- `issue_list` 또는 `pull_request_list`에서 `number` 전달
+- `issue_list` 또는 `pull_request_list`에서 `ref` 전달
+- `issue_list` 또는 `pull_request_list`에서 `limit`이 1 미만이거나 100 초과인 경우
 - `commit`에서 `ref` 누락
 - `commit`에서 `number` 전달
 - `commit_history`에서 `ref` 누락
 - `commit_history`에서 `number` 전달
 - `commit_history`에서 `limit`이 1 미만이거나 100 초과인 경우
+- `alias`가 어떤 `github.by_base_url[].alias`와도 일치하지 않는 경우
+- `base_url`과 `alias`를 함께 넣었지만 서로 다른 `github.by_base_url` 항목을 가리키는 경우
 - GitHub API가 4xx/5xx를 반환한 경우
